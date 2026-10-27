@@ -36,6 +36,7 @@ describe("SettingsStore", () => {
       start: "23:00",
       end: "07:00",
     });
+    expect(result.settings.persona.name).toBe("阿湛");
 
     const persisted = JSON.parse(
       await readFile(path.join(directory, "settings.json"), "utf8"),
@@ -54,6 +55,11 @@ describe("SettingsStore", () => {
         quietHours: { start: "22:30" },
       },
       appearance: { scale: 1.15 },
+      persona: {
+        name: "测试角色",
+        replyLength: "detailed",
+        preset: "custom",
+      },
     });
 
     expect(updated.window.x).toBe(120);
@@ -61,6 +67,8 @@ describe("SettingsStore", () => {
     expect(updated.proactive.enabled).toBe(false);
     expect(updated.proactive.quietHours.start).toBe("22:30");
     expect(updated.appearance.scale).toBe(1.15);
+    expect(updated.persona.name).toBe("测试角色");
+    expect(updated.persona.replyLength).toBe("detailed");
   });
 
   it("拒绝未知字段、非法时间和越界缩放", async () => {
@@ -72,6 +80,9 @@ describe("SettingsStore", () => {
       store.update({ proactive: { quietHours: { start: "25:00" } } }),
     ).rejects.toThrow();
     await expect(store.update({ appearance: { scale: 2 } })).rejects.toThrow();
+    await expect(
+      store.update({ persona: { replyLength: "verbose" } }),
+    ).rejects.toThrow();
   });
 
   it("损坏的设置文件会备份并恢复默认值", async () => {

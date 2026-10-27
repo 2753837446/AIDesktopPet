@@ -1,8 +1,39 @@
-import { app, BrowserWindow, ipcMain, Menu, screen, Tray, type Rectangle } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  Notification as ElectronNotification,
+  screen,
+  Tray,
+  type Rectangle,
+} from "electron";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { z } from "zod";
+import { AssistantCore } from "../core/assistant-core";
+import { DailyBriefService } from "../core/daily-brief-service";
+import { DeepSeekProvider } from "../core/deepseek-provider";
+import { HimalayaEmailConnector } from "../core/email-connector";
+import { MemoryService } from "../core/memory-service";
+import { SiliconFlowEmbeddingProvider } from "../core/siliconflow-embedding-provider";
+import { TaskEngine } from "../core/task-engine";
+import {
+  StaticPermissionPolicy,
+  ToolRuntime,
+} from "../core/tool-runtime";
 import { IPC_CHANNELS } from "../shared/desktop-api";
+import type { CreateTaskInput } from "../core/domain";
 import type { DesktopSettingsPatch, DesktopWindowMode } from "../shared/settings";
+import { CredentialStore } from "./credential-store";
 import { createTrayIcon } from "./icon";
+import { openDatabase, type OpenedDatabase } from "./persistence/database";
+import { SqliteConversationRepository } from "./persistence/conversation-repository";
+import { SqliteConnectorRepository } from "./persistence/connector-repository";
+import { SqliteDailyBriefRepository } from "./persistence/daily-brief-repository";
+import { SqliteMemoryRepository } from "./persistence/memory-repository";
+import { SqliteTaskRepository } from "./persistence/task-repository";
+import { SqliteToolCallRepository } from "./persistence/tool-call-repository";
 import { SettingsStore } from "./settings-store";
 
 const APP_ID = "com.aidesktoppet.desktop";
@@ -11,13 +42,24 @@ const WINDOW_BOUNDS_DEBOUNCE_MS = 250;
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settingsStore: SettingsStore;
+let credentialStore: CredentialStore;
+let databaseHandle: OpenedDatabase | null = null;
+let conversations: SqliteConversationRepository | null = null;
+let memoryService: MemoryService | null = null;
+let assistantCore: AssistantCore | null = null;
+let taskEngine: TaskEngine | null = null;
+let dailyBriefService: DailyBriefService | null = null;
+let toolRuntime: ToolRuntime | null = null;
+let connectorRepository: SqliteConnectorRepository | null = null;
 let quitting = false;
 let windowMode: DesktopWindowMode = "pet";
 let petBounds: Rectangle | null = null;
 let windowSaveTimer: NodeJS.Timeout | undefined;
 let ipcRegistered = false;
+const activeChatRequests = new Map<string, AbortController>();
 
 app.setAppUserModelId(APP_ID);
+app.setName("AI Desktop Pet");
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
@@ -33,6 +75,235 @@ app.whenReady().then(async () => {
   const loaded = await settingsStore.load();
   if (loaded.recovered) {
     console.warn("设置文件无效，已恢复安全默认值");
+  }
+
+  credentialStore = new CredentialStore(app.getPath("userData"));
+  try {
+    databaseHandle = openDatabase(
+      path.join(app.getPath("userData"), "ai-desktop-pet.sqlite"),
+    );
+    conversations = new SqliteConversationRepository(databaseHandle.database);
+    const memoryRepository = new SqliteMemoryRepository(databaseHandle.database);
+    const embeddingProvider = new SiliconFlowEmbeddingProvider(() =>
+      credentialStore.getProviderKey("siliconflow"),
+    );
+    memoryService = new MemoryService(memoryRepository, embeddingProvider);
+    const provider = new DeepSeekProvider({
+      apiKey: () => credentialStore.getDeepSeekKey(),
+      model: "deepseek-flash",
+    });
+    assistantCore = new AssistantCore(
+      conversations,
+      memoryService,
+      memoryService,
+      provider,
+      () => settingsStore.get().persona,
+    );
+    taskEngine = new TaskEngine(
+      new SqliteTaskRepository(databaseHandle.database),
+      {
+        notify: async ({ title, body }) => {
+          if (!ElectronNotification.isSupported()) {
+            throw new Error("SYSTEM_NOTIFICATION_UNAVAILABLE");
+          }
+          new ElectronNotification({ title, body }).show();
+        },
+      },
+    );
+    taskEngine.recover();
+    dailyBriefService = new DailyBriefService(
+      memoryService,
+      () => taskEngine?.listTasks(200) ?? [],
+      new SqliteDailyBriefRepository(databaseHandle.database),
+      provider,
+    );
+    taskEngine.registerExecutor("daily_brief", async () => {
+      await dailyBriefService?.generate();
+    });
+    const connectors = new SqliteConnectorRepository(
+      databaseHandle.database,
+    );
+    connectorRepository = connectors;
+    toolRuntime = new ToolRuntime(
+      new SqliteToolCallRepository(databaseHandle.database),
+      new StaticPermissionPolicy(
+        new Set([
+          "system.read",
+          "connector.read",
+          "email.read",
+          "email.send",
+          "email.write",
+        ]),
+      ),
+    );
+    toolRuntime.register({
+      name: "clock.read",
+      description: "读取当前本地时间；只读、无外部副作用。",
+      inputSchema: z.object({}).strict(),
+      riskLevel: "low",
+      requiredScopes: ["system.read"],
+      timeoutMs: 2_000,
+      execute: async () => ({
+        outputSummary: new Date().toLocaleString("zh-CN"),
+      }),
+    });
+    toolRuntime.register({
+      name: "connector.email.status",
+      description: "查看主邮箱连接器状态；不会读取邮件内容。",
+      inputSchema: z.object({}).strict(),
+      riskLevel: "low",
+      requiredScopes: ["connector.read"],
+      timeoutMs: 2_000,
+      execute: async () => {
+        const email = connectors
+          .list()
+          .find((connector) => connector.id === "email-primary");
+        return {
+          outputSummary: email
+            ? `${email.displayName}：${email.status}；provider=${email.provider}`
+            : "主邮箱连接器尚未注册",
+        };
+      },
+    });
+    const emailConnector = new HimalayaEmailConnector({
+      account: "qq",
+      inbox: "Inbox",
+    });
+    toolRuntime.register({
+      name: "email.inbox.list",
+      description: "通过 Himalaya 读取 QQ 主邮箱最近邮件头；不标记已读。",
+      inputSchema: z
+        .object({
+          limit: z.number().int().min(1).max(20).default(8),
+        })
+        .strict(),
+      riskLevel: "medium",
+      requiredScopes: ["email.read"],
+      timeoutMs: 35_000,
+      execute: async (input, context) => {
+        try {
+          const envelopes = await emailConnector.listRecent(
+            (input as { limit: number }).limit,
+            context.signal,
+          );
+          connectors.setStatus("email-primary", {
+            status: "connected",
+            accountLabel: "QQ 邮箱",
+          });
+          return {
+            outputSummary: `已读取 ${envelopes.length} 封邮件头`,
+            output: envelopes,
+          };
+        } catch (error) {
+          connectors.setStatus("email-primary", {
+            status: "error",
+            lastError:
+              error instanceof Error ? error.message : "邮箱连接失败",
+          });
+          throw error;
+        }
+      },
+    });
+    toolRuntime.register({
+      name: "email.message.read",
+      description: "通过 Himalaya 读取指定邮件；不会标记已读。",
+      inputSchema: z
+        .object({
+          id: z.string().min(1).max(200),
+        })
+        .strict(),
+      riskLevel: "medium",
+      requiredScopes: ["email.read"],
+      timeoutMs: 35_000,
+      execute: async (input, context) => {
+        const message = await emailConnector.readMessage(
+          (input as { id: string }).id,
+          context.signal,
+        );
+        connectors.setStatus("email-primary", {
+          status: "connected",
+          accountLabel: "QQ 邮箱",
+        });
+        return {
+          outputSummary: `已读取邮件 ${message.id}`,
+          output: message,
+        };
+      },
+    });
+    toolRuntime.register({
+      name: "email.send",
+      description: "发送新邮件并保存到已发送；必须由用户确认。",
+      inputSchema: z
+        .object({
+          to: z.string().email().max(254),
+          subject: z.string().trim().min(1).max(200),
+          body: z.string().min(1).max(20_000),
+        })
+        .strict(),
+      riskLevel: "high",
+      requiredScopes: ["email.send"],
+      timeoutMs: 35_000,
+      execute: async (input, context) => {
+        const message = input as { to: string; subject: string; body: string };
+        try {
+          await emailConnector.sendMessage({
+            to: message.to,
+            subject: message.subject,
+            body: message.body,
+          }, context.signal);
+          connectors.setStatus("email-primary", {
+            status: "connected",
+            accountLabel: "QQ 邮箱",
+          });
+          return {
+            outputSummary: `邮件已发送给 ${message.to}`,
+            output: { sent: true, to: message.to, subject: message.subject },
+          };
+        } catch (error) {
+          connectors.setStatus("email-primary", {
+            status: "error",
+            lastError: error instanceof Error ? error.message : "发信失败",
+          });
+          throw error;
+        }
+      },
+    });
+    toolRuntime.register({
+      name: "email.message.delete",
+      description: "把邮件移动到 QQ 已删除文件夹；必须由用户确认。",
+      inputSchema: z
+        .object({
+          id: z.string().min(1).max(200),
+        })
+        .strict(),
+      riskLevel: "high",
+      requiredScopes: ["email.write"],
+      timeoutMs: 35_000,
+      execute: async (input, context) => {
+        const id = (input as { id: string }).id;
+        await emailConnector.moveToDeleted(id, context.signal);
+        return {
+          outputSummary: `邮件 ${id} 已移动到已删除`,
+          output: { movedToDeleted: true, id },
+        };
+      },
+    });
+    taskEngine.ensureDailyBrief(
+      loaded.settings.dailyBrief.enabled,
+      loaded.settings.dailyBrief.time,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+    );
+    taskEngine.start();
+  } catch (error) {
+    console.error("初始化数据库失败", error);
+    databaseHandle = null;
+    conversations = null;
+    memoryService = null;
+    assistantCore = null;
+    taskEngine = null;
+    dailyBriefService = null;
+    toolRuntime = null;
+    connectorRepository = null;
   }
 
   createMainWindow(loaded.settings);
@@ -51,6 +322,16 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   quitting = true;
+  for (const controller of activeChatRequests.values()) {
+    controller.abort();
+  }
+  activeChatRequests.clear();
+  taskEngine?.stop();
+  taskEngine = null;
+  dailyBriefService = null;
+  toolRuntime = null;
+  databaseHandle?.database.close();
+  databaseHandle = null;
 });
 
 function createMainWindow(settings: ReturnType<SettingsStore["get"]>): void {
@@ -232,12 +513,29 @@ async function setWindowMode(mode: DesktopWindowMode): Promise<void> {
     return;
   }
 
-  if (mode === "settings") {
-    petBounds = mainWindow.getBounds();
-    mainWindow.setMinimumSize(700, 560);
-    mainWindow.setSize(820, 680, true);
+  if (
+    mode === "settings" ||
+    mode === "chat" ||
+    mode === "memory" ||
+    mode === "tasks" ||
+    mode === "daily" ||
+    mode === "tools"
+  ) {
+    if (windowMode === "pet") {
+      petBounds = mainWindow.getBounds();
+    }
+    if (mode === "settings") {
+      mainWindow.setMinimumSize(700, 560);
+      mainWindow.setSize(820, 680, true);
+    } else if (mode === "chat") {
+      mainWindow.setMinimumSize(520, 560);
+      mainWindow.setSize(620, 720, true);
+    } else {
+      mainWindow.setMinimumSize(680, 560);
+      mainWindow.setSize(860, 700, true);
+    }
     mainWindow.center();
-    windowMode = "settings";
+    windowMode = mode;
     return;
   }
 
@@ -296,7 +594,7 @@ function registerIpcHandlers(): void {
   }
   ipcRegistered = true;
 
-  ipcMain.handle(IPC_CHANNELS.getBootstrap, (event) => {
+  ipcMain.handle(IPC_CHANNELS.getBootstrap, async (event) => {
     assertTrustedSender(event.sender.id);
     return {
       settings: settingsStore.get(),
@@ -304,30 +602,393 @@ function registerIpcHandlers(): void {
         appVersion: app.getVersion(),
         platform: process.platform,
         isPackaged: app.isPackaged,
-        modelConfigured: false,
+        modelConfigured: await credentialStore.isConfigured(),
+        modelName: "deepseek-flash",
+        embeddingConfigured:
+          await credentialStore.isProviderConfigured("siliconflow"),
+        embeddingModel: "BAAI/bge-m3",
+        conversationId: conversations?.getMostRecentConversation()?.id ?? null,
+        database: {
+          ready: databaseHandle !== null,
+          schemaVersion: databaseHandle?.schemaVersion ?? null,
+        },
       },
     };
   });
 
   ipcMain.handle(IPC_CHANNELS.updateSettings, async (event, patch: unknown) => {
     assertTrustedSender(event.sender.id);
+    const previous = settingsStore.get();
     await settingsStore.update(patch as DesktopSettingsPatch);
+    const updated = settingsStore.get();
+    if (
+      JSON.stringify(previous.dailyBrief) !==
+      JSON.stringify(updated.dailyBrief)
+    ) {
+      taskEngine?.reconfigureDailyBrief(
+        updated.dailyBrief.enabled,
+        updated.dailyBrief.time,
+        Intl.DateTimeFormat().resolvedOptions().timeZone,
+      );
+    }
     applyDesktopSettings();
     return settingsStore.get();
   });
 
   ipcMain.handle(IPC_CHANNELS.setWindowMode, async (event, mode: unknown) => {
     assertTrustedSender(event.sender.id);
-    if (mode !== "pet" && mode !== "settings") {
+    if (
+      mode !== "pet" &&
+      mode !== "settings" &&
+      mode !== "chat" &&
+      mode !== "memory" &&
+      mode !== "tasks" &&
+      mode !== "daily" &&
+      mode !== "tools"
+    ) {
       throw new Error("INVALID_WINDOW_MODE");
     }
     await setWindowMode(mode);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.getChatHistory,
+    (event, conversationId: unknown, limit: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!conversations) {
+        throw new Error("DATABASE_UNAVAILABLE");
+      }
+      const parsedConversationId = z.string().uuid().parse(conversationId);
+      const parsedLimit =
+        limit === undefined ? 50 : z.number().int().min(1).max(100).parse(limit);
+      return conversations.listRecentMessages(parsedConversationId, parsedLimit);
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.startChat, (event, input: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!assistantCore) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    const request = chatStartSchema.parse(input);
+    if (activeChatRequests.has(request.requestId)) {
+      throw new Error("DUPLICATE_CHAT_REQUEST");
+    }
+
+    const controller = new AbortController();
+    activeChatRequests.set(request.requestId, controller);
+    setImmediate(() => {
+      void runChat(request, controller);
+    });
+    return { accepted: true as const };
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.cancelChat,
+    (event, requestId: unknown): { cancelled: boolean } => {
+      assertTrustedSender(event.sender.id);
+      const parsedRequestId = z.string().uuid().parse(requestId);
+      const controller = activeChatRequests.get(parsedRequestId);
+      if (!controller) {
+        return { cancelled: false };
+      }
+      controller.abort();
+      return { cancelled: true };
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.saveDeepSeekKey, async (event, apiKey: unknown) => {
+    assertTrustedSender(event.sender.id);
+    const parsedKey = z.string().min(24).max(256).parse(apiKey);
+    await credentialStore.setDeepSeekKey(parsedKey);
+    return { configured: true as const };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.clearDeepSeekKey, async (event) => {
+    assertTrustedSender(event.sender.id);
+    await credentialStore.clearDeepSeekKey();
+    return { configured: false as const };
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.saveSiliconFlowKey,
+    async (event, apiKey: unknown) => {
+      assertTrustedSender(event.sender.id);
+      const parsedKey = z.string().min(24).max(256).parse(apiKey);
+      await credentialStore.setProviderKey("siliconflow", parsedKey);
+      const scheduled = memoryService?.reindexAll() ?? 0;
+      return { configured: true as const, scheduled };
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.clearSiliconFlowKey, async (event) => {
+    assertTrustedSender(event.sender.id);
+    await credentialStore.clearProviderKey("siliconflow");
+    return { configured: false as const };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.reindexMemories, (event) => {
+    assertTrustedSender(event.sender.id);
+    return { scheduled: memoryService?.reindexAll() ?? 0 };
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.listMemories,
+    (event, query: unknown, limit: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!memoryService) {
+        throw new Error("DATABASE_UNAVAILABLE");
+      }
+      const parsedQuery =
+        query === undefined
+          ? undefined
+          : z.string().max(500).parse(query);
+      const parsedLimit =
+        limit === undefined ? 100 : z.number().int().min(1).max(200).parse(limit);
+      if (parsedQuery?.trim()) {
+        return memoryService.search({
+          query: parsedQuery,
+          modelDestination: "cloud",
+          limit: parsedLimit,
+        });
+      }
+      return memoryService.list({ limit: parsedLimit });
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.updateMemory,
+    (event, id: unknown, patch: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!memoryService) {
+        throw new Error("DATABASE_UNAVAILABLE");
+      }
+      const parsedId = z.string().uuid().parse(id);
+      const parsedPatch = memoryUpdateSchema.parse(patch);
+      const updated = memoryService.update(parsedId, {
+        ...(parsedPatch.content === undefined
+          ? {}
+          : { content: parsedPatch.content }),
+        ...(parsedPatch.type === undefined ? {} : { type: parsedPatch.type }),
+        ...(parsedPatch.importance === undefined
+          ? {}
+          : { importance: parsedPatch.importance }),
+      });
+      if (!updated) {
+        throw new Error("MEMORY_NOT_FOUND");
+      }
+      return updated;
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.deleteMemory, (event, id: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!memoryService) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    return { deleted: memoryService.delete(z.string().uuid().parse(id)) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.createTask, (event, input: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!taskEngine) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    const parsed = taskCreateSchema.parse(input);
+    return taskEngine.createTask(parsed as CreateTaskInput);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.listTasks, (event, limit: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!taskEngine) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    return taskEngine.listTasks(
+      limit === undefined ? 100 : z.number().int().min(1).max(200).parse(limit),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.completeTask, (event, id: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!taskEngine) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    return { updated: taskEngine.completeTask(z.string().uuid().parse(id)) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.cancelTask, (event, id: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!taskEngine) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    return { updated: taskEngine.cancelTask(z.string().uuid().parse(id)) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getLatestDailyBrief, (event) => {
+    assertTrustedSender(event.sender.id);
+    return dailyBriefService?.latest() ?? null;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.generateDailyBrief, async (event) => {
+    assertTrustedSender(event.sender.id);
+    if (!dailyBriefService) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    return dailyBriefService.generate();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.listTools, (event) => {
+    assertTrustedSender(event.sender.id);
+    return toolRuntime?.listTools() ?? [];
+  });
+
+  ipcMain.handle(IPC_CHANNELS.invokeTool, async (event, input: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!toolRuntime) {
+      throw new Error("TOOL_RUNTIME_UNAVAILABLE");
+    }
+    const parsed = toolInvokeSchema.parse(input);
+    return toolRuntime.invoke(parsed);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.listToolCalls, (event, limit: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!toolRuntime) {
+      return [];
+    }
+    return toolRuntime.listCalls(
+      limit === undefined ? 100 : z.number().int().min(1).max(200).parse(limit),
+    );
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.approveTool,
+    async (event, callId: unknown, approved: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!toolRuntime) {
+        throw new Error("TOOL_RUNTIME_UNAVAILABLE");
+      }
+      return toolRuntime.approve(
+        z.string().uuid().parse(callId),
+        z.boolean().parse(approved),
+      );
+    },
+  );
+
+  ipcMain.handle(IPC_CHANNELS.cancelTool, (event, callId: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!toolRuntime) {
+      return { cancelled: false };
+    }
+    return {
+      cancelled: toolRuntime.cancel(z.string().uuid().parse(callId)),
+    };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.listConnectors, (event) => {
+    assertTrustedSender(event.sender.id);
+    if (!databaseHandle) {
+      return [];
+    }
+    return new SqliteConnectorRepository(databaseHandle.database).list();
   });
 
   ipcMain.handle(IPC_CHANNELS.quit, async (event) => {
     assertTrustedSender(event.sender.id);
     await quitApplication();
   });
+}
+
+const chatStartSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    conversationId: z.string().uuid().optional(),
+    message: z.string().trim().min(1).max(32_000),
+  })
+  .strict();
+
+const memoryUpdateSchema = z
+  .object({
+    content: z.string().trim().min(2).max(2_000).optional(),
+    type: z
+      .enum([
+        "profile",
+        "preference",
+        "fact",
+        "project_decision",
+        "event",
+        "summary",
+        "commitment",
+      ])
+      .optional(),
+    importance: z.number().min(0).max(1).optional(),
+  })
+  .strict();
+
+const taskCreateSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    description: z.string().trim().max(2_000).optional(),
+    dueAt: z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
+      message: "dueAt 必须是 ISO 时间",
+    }),
+    timezone: z.string().trim().min(1).max(100),
+    idempotencyKey: z.string().uuid(),
+    priority: z.number().int().min(1).max(5).optional(),
+    projectId: z.string().uuid().nullable().optional(),
+    recurrence: z.enum(["none", "daily", "weekdays", "weekly"]).optional(),
+  })
+  .strict();
+
+const toolInvokeSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    toolName: z.string().min(1).max(100),
+    input: z.unknown(),
+  })
+  .strict();
+
+type ChatStart = z.infer<typeof chatStartSchema>;
+
+async function runChat(
+  request: ChatStart,
+  controller: AbortController,
+): Promise<void> {
+  if (!assistantCore || !mainWindow) {
+    return;
+  }
+
+  try {
+    for await (const event of assistantCore.sendMessage({
+      conversationId: request.conversationId,
+      message: request.message,
+      modelDestination: "cloud",
+      signal: controller.signal,
+    })) {
+      if (!mainWindow?.isDestroyed()) {
+        mainWindow?.webContents.send(IPC_CHANNELS.chatEvent, {
+          requestId: request.requestId,
+          event,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("聊天处理失败", error);
+    if (!mainWindow?.isDestroyed()) {
+      mainWindow?.webContents.send(IPC_CHANNELS.chatEvent, {
+        requestId: request.requestId,
+        event: {
+          type: "message.failed",
+          assistantMessageId: randomUUID(),
+          code: "ASSISTANT_UNAVAILABLE",
+          message: "对话服务暂时不可用",
+          retryable: true,
+        },
+      });
+    }
+  } finally {
+    activeChatRequests.delete(request.requestId);
+  }
 }
 
 function assertTrustedSender(senderId: number): void {

@@ -9,6 +9,9 @@
 | Electron | 45.0.0 | MIT | 桌面窗口、托盘、系统通知和隔离 preload | 体积较大，但 Windows x64 支持成熟；首次安装包仍需真机验证 |
 | React / React DOM | 19.3.1 | MIT | 设置页与桌宠界面 | 纯渲染层依赖，兼容 Electron Chromium |
 | Zod | 4.6.7 | MIT | 配置和 IPC 输入运行时校验 | 无原生模块，打包风险低 |
+| Luxon | 3.7.2 | MIT | IANA 时区、DST 安全的下一次任务时间计算 | 纯 JavaScript；仅主进程运行 |
+| Himalaya CLI | 2.1.0（外部可执行文件） | Apache-2.0 | QQ 邮箱 IMAP/SMTP Connector | 当前未随应用打包，依赖 PATH 和用户 Himalaya 配置；分发前仍需核验构建产物与第三方依赖 |
+| Node `node:sqlite` | Electron 45 内置 Node 24.22 | Node.js 许可证 | 本地结构化数据、迁移和 FTS5 | 无额外原生模块；需验证 Electron 升级时的 SQLite API 兼容性 |
 | electron-vite | 6.0.0 | MIT | main / preload / renderer 三端构建 | 支持 Vite 8；构建输出由 electron-builder 打包 |
 | Vite | 8.3.5 | MIT | renderer 开发服务器与生产构建 | 需要 Node 22+ 构建环境，用户运行安装包时不需要 Node |
 | TypeScript | 7.0.2 | Apache-2.0 | 严格类型检查 | 仅构建期依赖 |
@@ -42,15 +45,16 @@
 
 # 3. 原生模块策略
 
-当前 P1 没有原生运行时模块。SQLite 阶段需要单独评估并验证：
+当前没有第三方原生运行时模块。Electron 45 已实测内置 `node:sqlite` 可以执行 migration、CRUD 和 FTS5。
 
-- better-sqlite3 等 binding 的 Electron ABI、Windows x64 构建和升级流程。
-- sqlite-vec 等向量扩展的 Windows 兼容性、包体积和许可证。
-- 原生模块签名、更新与错误恢复。
+后续向量检索仍需要单独评估：
+
+- 当前 P5 使用 SiliconFlow `BAAI/bge-m3` API，向量以 JSON 存入 SQLite，并在本地执行余弦相似度。
+- 数据规模扩大后可评估 sqlite-vec 等本地扩展；当前不引入额外原生模块。
 
 在完成集成测试前，不把任何 SQLite 或向量扩展写入生产依赖。
 
-P1 已验证 `dist/win-unpacked` 可以启动。当前构建明确关闭可执行文件编辑和签名，因此它只用于开发验证，不得作为正式发布包；正式发布前必须补应用图标、版本元数据、代码签名、NSIS 安装和干净 Windows 环境测试。
+P1–P5 已验证 `dist/win-unpacked` 可以启动。当前构建明确关闭可执行文件编辑和签名，因此它只用于开发验证，不得作为正式发布包；正式发布前必须补应用图标、版本元数据、代码签名、NSIS 安装和干净 Windows 环境测试。
 
 # 4. 许可证策略
 

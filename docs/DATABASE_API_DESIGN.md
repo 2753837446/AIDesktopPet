@@ -27,12 +27,15 @@
 | memory_sources | 记忆来源关联 | memory ↔ source |
 | memory_links | 记忆关系 | 支持、冲突、替代、派生 |
 | memory_chunks | 向量检索文本片段 | 指向 memory / message / document |
+| memory_embeddings | BGE-M3 向量及模型版本 | chunk ↔ embedding；删除 chunk 时级联清理 |
 | tasks | 任务定义与当前状态 | 1:N task_runs |
 | task_runs | 每次任务执行记录 | 可重试、可审计 |
 | task_schedule_occurrences | 重复任务的具体调度实例 | 防重复调度 |
 | events | 外部或内部事件队列 | 去重处理 |
 | notifications | 逻辑通知记录 | 分类、优先级和幂等 |
 | notification_deliveries | 各渠道通知投递记录 | 同一通知多渠道投递 |
+| daily_briefs | 每日总结与数据源状态 | 按日期和时区唯一 |
+| tool_calls | 工具请求、风险、确认与执行状态 | 可关联 trace 和审计 |
 | automation_rules | 主动任务规则 | 关联权限与触发器 |
 | connectors | 外部连接器授权元数据 | 不保存明文密钥 |
 | audit_logs | 权限、记忆修改、工具执行等审计 | 可按 trace_id 检索 |
@@ -447,8 +450,8 @@ FTS 索引通过应用层事务或可靠的索引任务与 `memory_chunks` 同�
 
 | 决策 | 推荐默认 | 验证方式 |
 | --- | --- | --- |
-| SQLite binding | 选用成熟且与 Electron 打包兼容的 binding | Windows clean install + rebuild test |
+| SQLite binding | Electron 45 内置 `node:sqlite`（Node 24.22 已验证） | migration、CRUD、FTS5 和 Windows 打包启动测试 |
 | 向量索引 | 先验证可嵌入本地的向量扩展；不合适则用独立本地索引模块 | 召回、延迟、安装体积、升级兼容性 |
 | Embedding 推理 | 先支持 API provider；本地模型作为后续选项 | 隐私、费用、速度和离线需求对比 |
-| 中文全文检索 | FTS5 + 中文预处理 / n-gram 方案 | 中英文混合检索基准集 |
+| 中文全文检索 | FTS5 `trigram` + 关键词 / 最近重要记忆 fallback | 中英文混合检索基准集 |
 | 密钥存储 | Windows Credential Manager / OS credential store 封装 | 安装包、用户权限、卸载和备份测试 |

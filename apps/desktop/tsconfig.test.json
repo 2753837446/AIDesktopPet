@@ -16,6 +16,8 @@
     "playwright.config.ts",
     "vitest.config.mts",
     "tests/**/*.ts",
+    "src/core/**/*.ts",
+    "src/main/persistence/**/*.ts",
     "src/main/settings-store.ts",
     "src/main/settings-schema.ts",
     "src/shared/**/*.ts",

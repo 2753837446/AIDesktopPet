@@ -16,6 +16,7 @@
   "include": [
     "src/renderer/src/**/*.ts",
     "src/renderer/src/**/*.tsx",
+    "src/core/domain.ts",
     "src/shared/**/*.ts"
   ]
 }

@@ -15,7 +15,7 @@
 
 ## 当前进度
 
-P1 桌宠基础壳已完成。当前可运行 Electron 透明窗口、托盘、设置持久化和隔离 IPC；SQLite 业务库、Assistant Core、Memory Service、Task Engine 和 Connector 尚未实现。阶段状态以本文件和 OpenSpec 变更记录为准，不以计划中的能力描述推断完成状态。
+P1-P7 已完成，P8 角色人格配置已实现。当前可运行 Electron 透明窗口、托盘、设置持久化、隔离 IPC、SQLite migration v6、真实 `deepseek-flash` 流式对话、BGE-M3 语义检索、可纠正/删除记忆、重复任务、自动总结、Windows 通知、工具权限确认 / 审计、QQ 邮箱 Connector 和版本化角色人格。人格配置只影响表达与建议方式，不覆盖安全、权限和工具规则。邮件发送与删除尚未做真实副作用测试；模型 function calling 和日历 Connector 尚未实现。
 
 # 2. 建议仓库结构
 

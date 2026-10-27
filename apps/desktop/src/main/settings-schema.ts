@@ -38,6 +38,28 @@ export const desktopSettingsSchema = z
         launchAtLogin: z.boolean(),
       })
       .strict(),
+    dailyBrief: z
+      .object({
+        enabled: z.boolean(),
+        time: clockTime,
+      })
+      .strict()
+      .default(DEFAULT_SETTINGS.dailyBrief),
+    persona: z
+      .object({
+        version: z.literal(1),
+        preset: z.enum(["azure", "calm", "lively", "custom"]),
+        name: z.string().trim().min(1).max(30),
+        selfReference: z.string().trim().min(1).max(20),
+        userTitle: z.string().trim().min(1).max(30),
+        description: z.string().trim().min(1).max(1_000),
+        tone: z.string().trim().min(1).max(500),
+        replyLength: z.enum(["concise", "balanced", "detailed"]),
+        boundaries: z.string().trim().max(1_000),
+        proactiveStyle: z.enum(["quiet", "standard", "active"]),
+      })
+      .strict()
+      .default(DEFAULT_SETTINGS.persona),
     appearance: z
       .object({
         character: z.literal("azure"),
@@ -80,6 +102,28 @@ export const desktopSettingsPatchSchema = z
       })
       .strict()
       .optional(),
+    dailyBrief: z
+      .object({
+        enabled: z.boolean().optional(),
+        time: clockTime.optional(),
+      })
+      .strict()
+      .optional(),
+    persona: z
+      .object({
+        version: z.literal(1).optional(),
+        preset: z.enum(["azure", "calm", "lively", "custom"]).optional(),
+        name: z.string().trim().min(1).max(30).optional(),
+        selfReference: z.string().trim().min(1).max(20).optional(),
+        userTitle: z.string().trim().min(1).max(30).optional(),
+        description: z.string().trim().min(1).max(1_000).optional(),
+        tone: z.string().trim().min(1).max(500).optional(),
+        replyLength: z.enum(["concise", "balanced", "detailed"]).optional(),
+        boundaries: z.string().trim().max(1_000).optional(),
+        proactiveStyle: z.enum(["quiet", "standard", "active"]).optional(),
+      })
+      .strict()
+      .optional(),
     appearance: z
       .object({
         character: z.literal("azure").optional(),
@@ -119,6 +163,14 @@ export function mergeSettings(
     startup: {
       ...current.startup,
       ...patch.startup,
+    },
+    dailyBrief: {
+      ...current.dailyBrief,
+      ...patch.dailyBrief,
+    },
+    persona: {
+      ...current.persona,
+      ...patch.persona,
     },
     appearance: {
       ...current.appearance,
