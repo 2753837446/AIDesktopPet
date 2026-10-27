@@ -357,4 +357,83 @@ export const migrations: Migration[] = [
       WHERE id = 'email-primary';
     `,
   },
+  {
+    version: 7,
+    name: "character image assets",
+    sql: `
+      CREATE TABLE character_assets (
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        view TEXT NOT NULL DEFAULT 'idle'
+          CHECK(view IN
+            ('front','left','right','back','idle','talking','thinking','sleeping')),
+        mime_type TEXT NOT NULL
+          CHECK(mime_type IN ('image/png','image/gif','image/webp')),
+        width INTEGER NOT NULL CHECK(width > 0),
+        height INTEGER NOT NULL CHECK(height > 0),
+        size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+        file_path TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_character_assets_created
+        ON character_assets(created_at);
+    `,
+  },
+  {
+    version: 8,
+    name: "character asset generation lineage",
+    sql: `
+      CREATE TABLE character_assets_v8 (
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        view TEXT NOT NULL DEFAULT 'idle'
+          CHECK(view IN
+            ('front','left','right','back','idle','talking','thinking','sleeping')),
+        mime_type TEXT NOT NULL
+          CHECK(mime_type IN
+            ('image/png','image/gif','image/webp','image/jpeg')),
+        width INTEGER NOT NULL CHECK(width > 0),
+        height INTEGER NOT NULL CHECK(height > 0),
+        size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+        file_path TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT 'upload'
+          CHECK(origin IN ('upload','ai_generated')),
+        source_asset_id TEXT,
+        generation_prompt TEXT,
+        generation_model TEXT,
+        generated_at TEXT,
+        created_at TEXT NOT NULL,
+        CHECK (
+          (origin = 'upload'
+            AND source_asset_id IS NULL
+            AND generation_prompt IS NULL
+            AND generation_model IS NULL
+            AND generated_at IS NULL)
+          OR
+          (origin = 'ai_generated'
+            AND source_asset_id IS NOT NULL
+            AND generation_prompt IS NOT NULL
+            AND generation_model IS NOT NULL
+            AND generated_at IS NOT NULL)
+        )
+      );
+
+      INSERT INTO character_assets_v8
+        (id, display_name, view, mime_type, width, height, size_bytes,
+         file_path, origin, source_asset_id, generation_prompt,
+         generation_model, generated_at, created_at)
+      SELECT
+        id, display_name, view, mime_type, width, height, size_bytes,
+        file_path, 'upload', NULL, NULL, NULL, NULL, created_at
+      FROM character_assets;
+
+      DROP TABLE character_assets;
+      ALTER TABLE character_assets_v8 RENAME TO character_assets;
+
+      CREATE INDEX idx_character_assets_created
+        ON character_assets(created_at);
+      CREATE INDEX idx_character_assets_source
+        ON character_assets(source_asset_id);
+    `,
+  },
 ];

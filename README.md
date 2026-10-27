@@ -4,7 +4,7 @@ Windows 优先的 AI 桌宠项目。桌宠是用户入口，核心能力包括 A
 
 ## 当前状态
 
-**P9 工具审计可观测性已实现，P8 人格配置已通过真实 DeepSeek 回归。**
+**P11 AI 角色姿态导演已实现：可从聊天或设置生成新姿态候选，确认后才切换。**
 
 已实现：
 
@@ -33,6 +33,14 @@ Windows 优先的 AI 桌宠项目。桌宠是用户入口，核心能力包括 A
 - 人格设置支持 JSON 导入导出，下一轮对话立即生效。
 - 固定安全底座不可被人格配置覆盖。
 - 工具中心增加持久化审计记录和筛选，显示动作、结果、原因与 trace ID。
+- 支持上传 PNG/GIF/WebP 桌宠形象，持久化、预览、切换和删除。
+- 图片资产校验真实格式、10 MiB 大小上限和 4096×4096 尺寸上限。
+- 角色资产预留 front/left/right/back 与状态视图，为多视图和 3D 演进提供统一入口。
+- 支持在聊天中说“让她坐在凳子上”，或在设置页输入姿态描述。
+- 动作指令先显示参考角色、模型、云端上传与可能费用，确认后才调用硅基流动 `Qwen/Qwen-Image-Edit-2509`。
+- AI 生成结果保存为新 `ai_generated` 资产，记录源角色、提示词、模型和时间；不覆盖原图。
+- 生成结果先预览，用户点击“设为桌宠”后才切换，可随时切回原图或历史姿态。
+- 生图结果立即下载并验证公网 HTTPS、图片格式、尺寸和 10 MiB 上限；支持 120 秒超时和取消。
 - 未配置模型时的明确基础可用状态。
 - 设置、数据库、记忆、Assistant Core、SSE、任务调度和 Electron 端到端测试。
 
@@ -41,6 +49,7 @@ Windows 优先的 AI 桌宠项目。桌宠是用户入口，核心能力包括 A
 - 日历 Connector
 - 模型 function calling
 - 邮件发送和删除的真实副作用验收
+- 多视图角色包编辑器、连续动作帧、2D 骨骼和 3D 渲染器
 - 签名的 Windows 安装包
 
 ![P1 桌宠界面](./docs/assets/p1-pet-shell.png)
@@ -57,6 +66,8 @@ Windows 优先的 AI 桌宠项目。桌宠是用户入口，核心能力包括 A
 
 ![工具与连接器](./docs/assets/p7-tool-center.png)
 
+![聊天中的 AI 姿态确认](./docs/assets/p11-pose-director.png)
+
 ## 文档入口
 
 - [产品需求](./docs/PRD.md)
@@ -70,6 +81,7 @@ Windows 优先的 AI 桌宠项目。桌宠是用户入口，核心能力包括 A
 - [视频技术借鉴](./docs/Windows_AI桌宠_视频技术借鉴与长期记忆架构方案.md)
 - [视频读取结果](./docs/VIDEO_FINDINGS.md)
 - [依赖与许可证](./docs/DEPENDENCIES.md)
+- [角色展现与 3D 演进](./docs/CHARACTER_RUNTIME.md)
 
 ## 本地运行
 
@@ -91,7 +103,7 @@ pnpm build
 
 首版目标是 Windows 10 22H2 x64 与 Windows 11 x64 上的 2D 桌宠，基础桌宠不依赖模型、Agent runtime 或 QQ/NapCat/AstrBot 才能启动。ARM64 只有在真实安装包和运行验证完成后才能纳入支持矩阵。
 
-下一阶段进入 P10：接入模型 function calling 和日历 Connector，并在明确测试收件人后执行邮件发送/删除的真实副作用验收。DeepSeek 与 BGE-M3 的 API Key 都只能通过设置页写入 Windows DPAPI 加密文件；QQ 授权码由 Windows Credential Locker 提供。
+下一阶段进入 P12：接入模型 function calling、日历 Connector，并补邮件发送/删除的真实副作用验收。角色侧将把单张姿态候选扩展为动作关键帧、表情包和多视图资产，再评估 2D 骨骼与 GLB 3D；多视图图片本身不等于可自由动画的 3D 模型。DeepSeek 与 SiliconFlow 的 API Key 都只能通过设置页写入 Windows DPAPI 加密文件；QQ 授权码由 Windows Credential Locker 提供。
 
 ## 仓库约束
 

@@ -63,6 +63,7 @@ export const desktopSettingsSchema = z
     appearance: z
       .object({
         character: z.literal("azure"),
+        customCharacterId: z.string().uuid().nullable().default(null),
         scale: z.number().min(0.65).max(1.35),
       })
       .strict(),
@@ -127,6 +128,7 @@ export const desktopSettingsPatchSchema = z
     appearance: z
       .object({
         character: z.literal("azure").optional(),
+        customCharacterId: z.string().uuid().nullable().optional(),
         scale: z.number().min(0.65).max(1.35).optional(),
       })
       .strict()

@@ -12,6 +12,10 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
 import { AssistantCore } from "../core/assistant-core";
+import {
+  CHARACTER_IMAGE_EDIT_MODEL,
+  SiliconFlowCharacterImageEditProvider,
+} from "../core/character-image-edit-provider";
 import { DailyBriefService } from "../core/daily-brief-service";
 import { DeepSeekProvider } from "../core/deepseek-provider";
 import { HimalayaEmailConnector } from "../core/email-connector";
@@ -26,9 +30,12 @@ import { IPC_CHANNELS } from "../shared/desktop-api";
 import type { CreateTaskInput } from "../core/domain";
 import type { DesktopSettingsPatch, DesktopWindowMode } from "../shared/settings";
 import { CredentialStore } from "./credential-store";
+import { CharacterAssetService } from "./character-asset-service";
+import { CharacterPoseDirector } from "./character-pose-director";
 import { createTrayIcon } from "./icon";
 import { openDatabase, type OpenedDatabase } from "./persistence/database";
 import { SqliteAuditRepository } from "./persistence/audit-repository";
+import { SqliteCharacterAssetRepository } from "./persistence/character-asset-repository";
 import { SqliteConversationRepository } from "./persistence/conversation-repository";
 import { SqliteConnectorRepository } from "./persistence/connector-repository";
 import { SqliteDailyBriefRepository } from "./persistence/daily-brief-repository";
@@ -52,12 +59,16 @@ let taskEngine: TaskEngine | null = null;
 let dailyBriefService: DailyBriefService | null = null;
 let toolRuntime: ToolRuntime | null = null;
 let connectorRepository: SqliteConnectorRepository | null = null;
+let characterAssets: CharacterAssetService | null = null;
+let characterPoseDirector: CharacterPoseDirector | null = null;
+let auditRepository: SqliteAuditRepository | null = null;
 let quitting = false;
 let windowMode: DesktopWindowMode = "pet";
 let petBounds: Rectangle | null = null;
 let windowSaveTimer: NodeJS.Timeout | undefined;
 let ipcRegistered = false;
 const activeChatRequests = new Map<string, AbortController>();
+const activePoseRequests = new Map<string, AbortController>();
 
 app.setAppUserModelId(APP_ID);
 app.setName("AI Desktop Pet");
@@ -84,6 +95,17 @@ app.whenReady().then(async () => {
       path.join(app.getPath("userData"), "ai-desktop-pet.sqlite"),
     );
     conversations = new SqliteConversationRepository(databaseHandle.database);
+    characterAssets = new CharacterAssetService(
+      app.getPath("userData"),
+      new SqliteCharacterAssetRepository(databaseHandle.database),
+    );
+    characterPoseDirector = new CharacterPoseDirector(
+      characterAssets,
+      new SiliconFlowCharacterImageEditProvider(() =>
+        credentialStore.getProviderKey("siliconflow"),
+      ),
+    );
+    auditRepository = new SqliteAuditRepository(databaseHandle.database);
     const memoryRepository = new SqliteMemoryRepository(databaseHandle.database);
     const embeddingProvider = new SiliconFlowEmbeddingProvider(() =>
       credentialStore.getProviderKey("siliconflow"),
@@ -305,6 +327,9 @@ app.whenReady().then(async () => {
     dailyBriefService = null;
     toolRuntime = null;
     connectorRepository = null;
+    characterAssets = null;
+    characterPoseDirector = null;
+    auditRepository = null;
   }
 
   createMainWindow(loaded.settings);
@@ -327,6 +352,10 @@ app.on("before-quit", () => {
     controller.abort();
   }
   activeChatRequests.clear();
+  for (const controller of activePoseRequests.values()) {
+    controller.abort();
+  }
+  activePoseRequests.clear();
   taskEngine?.stop();
   taskEngine = null;
   dailyBriefService = null;
@@ -597,6 +626,8 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getBootstrap, async (event) => {
     assertTrustedSender(event.sender.id);
+    const siliconFlowConfigured =
+      await credentialStore.isProviderConfigured("siliconflow");
     return {
       settings: settingsStore.get(),
       meta: {
@@ -605,9 +636,10 @@ function registerIpcHandlers(): void {
         isPackaged: app.isPackaged,
         modelConfigured: await credentialStore.isConfigured(),
         modelName: "deepseek-flash",
-        embeddingConfigured:
-          await credentialStore.isProviderConfigured("siliconflow"),
+        embeddingConfigured: siliconFlowConfigured,
         embeddingModel: "BAAI/bge-m3",
+        imageGenerationConfigured: siliconFlowConfigured,
+        imageGenerationModel: CHARACTER_IMAGE_EDIT_MODEL,
         conversationId: conversations?.getMostRecentConversation()?.id ?? null,
         database: {
           ready: databaseHandle !== null,
@@ -914,6 +946,121 @@ function registerIpcHandlers(): void {
     },
   );
 
+  ipcMain.handle(IPC_CHANNELS.listCharacterAssets, (event) => {
+    assertTrustedSender(event.sender.id);
+    return characterAssets?.list() ?? [];
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.uploadCharacterAsset,
+    async (event, input: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!characterAssets) {
+        throw new Error("CHARACTER_ASSET_SERVICE_UNAVAILABLE");
+      }
+      const parsed = characterUploadSchema.parse(input);
+      return characterAssets.save({
+        fileName: parsed.fileName,
+        bytes: parsed.bytes,
+        view: parsed.view,
+        ...(parsed.displayName === undefined
+          ? {}
+          : { displayName: parsed.displayName }),
+      });
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.getCharacterAssetData,
+    async (event, id: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!characterAssets) {
+        throw new Error("CHARACTER_ASSET_SERVICE_UNAVAILABLE");
+      }
+      return characterAssets.read(z.string().uuid().parse(id));
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.deleteCharacterAsset,
+    async (event, id: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!characterAssets) {
+        throw new Error("CHARACTER_ASSET_SERVICE_UNAVAILABLE");
+      }
+      const assetId = z.string().uuid().parse(id);
+      const deleted = await characterAssets.delete(assetId);
+      if (
+        deleted &&
+        settingsStore.get().appearance.customCharacterId === assetId
+      ) {
+        await settingsStore.update({
+          appearance: { customCharacterId: null },
+        });
+        applyDesktopSettings();
+      }
+      return { deleted };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.generateCharacterPose,
+    async (event, input: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!characterPoseDirector) {
+        throw new Error("CHARACTER_POSE_UNAVAILABLE");
+      }
+      const parsed = characterPoseGenerationSchema.parse(input);
+      if (activePoseRequests.size > 0) {
+        throw new Error("CHARACTER_POSE_BUSY");
+      }
+      if (activePoseRequests.has(parsed.requestId)) {
+        throw new Error("DUPLICATE_CHARACTER_POSE_REQUEST");
+      }
+
+      const controller = new AbortController();
+      activePoseRequests.set(parsed.requestId, controller);
+      try {
+        const asset = await characterPoseDirector.generate({
+          sourceAssetId: parsed.sourceAssetId,
+          instruction: parsed.instruction,
+          signal: controller.signal,
+        });
+        recordPoseAudit({
+          outcome: "completed",
+          targetId: parsed.sourceAssetId,
+          traceId: parsed.requestId,
+          reason: asset.generationModel ?? null,
+        });
+        return asset;
+      } catch (error) {
+        recordPoseAudit({
+          outcome: controller.signal.aborted ? "cancelled" : "failed",
+          targetId: parsed.sourceAssetId,
+          traceId: parsed.requestId,
+          reason: stableErrorCode(error),
+        });
+        throw error;
+      } finally {
+        activePoseRequests.delete(parsed.requestId);
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.cancelCharacterPoseGeneration,
+    (event, requestId: unknown): { cancelled: boolean } => {
+      assertTrustedSender(event.sender.id);
+      const parsedId = z.string().uuid().parse(requestId);
+      const controller = activePoseRequests.get(parsedId);
+      if (!controller) {
+        return { cancelled: false };
+      }
+      controller.abort();
+      return { cancelled: true };
+    },
+  );
+
   ipcMain.handle(IPC_CHANNELS.quit, async (event) => {
     assertTrustedSender(event.sender.id);
     await quitApplication();
@@ -969,6 +1116,32 @@ const toolInvokeSchema = z
   })
   .strict();
 
+const characterUploadSchema = z
+  .object({
+    fileName: z.string().min(1).max(255),
+    bytes: z.instanceof(Uint8Array),
+    view: z.enum([
+      "front",
+      "left",
+      "right",
+      "back",
+      "idle",
+      "talking",
+      "thinking",
+      "sleeping",
+    ]),
+    displayName: z.string().trim().min(1).max(80).optional(),
+  })
+  .strict();
+
+const characterPoseGenerationSchema = z
+  .object({
+    requestId: z.string().uuid(),
+    sourceAssetId: z.string().uuid(),
+    instruction: z.string().trim().min(2).max(500),
+  })
+  .strict();
+
 type ChatStart = z.infer<typeof chatStartSchema>;
 
 async function runChat(
@@ -1016,6 +1189,37 @@ function assertTrustedSender(senderId: number): void {
   if (!mainWindow || mainWindow.webContents.id !== senderId) {
     throw new Error("UNTRUSTED_IPC_SENDER");
   }
+}
+
+function recordPoseAudit(input: {
+  outcome: string;
+  targetId: string;
+  traceId: string;
+  reason: string | null;
+}): void {
+  try {
+    auditRepository?.record({
+      actorType: "user",
+      action: "character.pose.generate",
+      targetType: "character_asset",
+      targetId: input.targetId,
+      outcome: input.outcome,
+      reason: input.reason,
+      traceId: input.traceId,
+    });
+  } catch (error) {
+    console.error("记录角色姿态审计失败", error);
+  }
+}
+
+function stableErrorCode(error: unknown): string {
+  if (error instanceof Error) {
+    const match = error.message.match(/CHARACTER_[A-Z_]+/);
+    if (match?.[0]) {
+      return match[0];
+    }
+  }
+  return "CHARACTER_POSE_UNKNOWN_ERROR";
 }
 
 async function quitApplication(): Promise<void> {

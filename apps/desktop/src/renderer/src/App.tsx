@@ -10,9 +10,12 @@ import {
   parsePersonaPackage,
   serializePersonaPackage,
 } from "../../shared/persona-package";
+import { parseCharacterPoseInstruction } from "../../shared/character-pose-command";
 import type {
   AssistantStreamEvent,
   AuditLogRecord,
+  CharacterAsset,
+  CharacterView,
   ConnectorRecord,
   DailyBriefRecord,
   MemorySearchResult,
@@ -213,7 +216,11 @@ export function App(): React.JSX.Element {
               current
                 ? {
                     ...current,
-                    meta: { ...current.meta, embeddingConfigured },
+                    meta: {
+                      ...current.meta,
+                      embeddingConfigured,
+                      imageGenerationConfigured: embeddingConfigured,
+                    },
                   }
                 : current,
             )
@@ -224,6 +231,9 @@ export function App(): React.JSX.Element {
           bootstrap={bootstrap}
           onClose={() => void returnToPet()}
           onOpenSettings={() => void openSettings()}
+          onCharacterSelected={(customCharacterId) =>
+            void updateSettings({ appearance: { customCharacterId } })
+          }
         />
       ) : view === "memory" ? (
         <MemoryCenter
@@ -316,7 +326,9 @@ function PetStage({
         className="character-wrap"
         style={{ transform: `scale(${settings.appearance.scale})` }}
       >
-        <AzureCharacter />
+        <CharacterVisual
+          customCharacterId={settings.appearance.customCharacterId}
+        />
       </div>
 
       <div className="pet-footer no-drag">
@@ -355,12 +367,14 @@ interface ChatPanelProps {
   bootstrap: DesktopBootstrap;
   onClose: () => void;
   onOpenSettings: () => void;
+  onCharacterSelected: (customCharacterId: string) => void;
 }
 
 function ChatPanel({
   bootstrap,
   onClose,
   onOpenSettings,
+  onCharacterSelected,
 }: ChatPanelProps): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string | null>(
     bootstrap.meta.conversationId,
@@ -372,6 +386,14 @@ function ChatPanel({
   const [memoryNotice, setMemoryNotice] = useState("");
   const [chatError, setChatError] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(Boolean(conversationId));
+  const [poseProposal, setPoseProposal] = useState<{
+    originalText: string;
+    instruction: string;
+  } | null>(null);
+  const [poseGenerating, setPoseGenerating] = useState(false);
+  const [poseRequestId, setPoseRequestId] = useState<string | null>(null);
+  const [poseCandidate, setPoseCandidate] = useState<CharacterAsset | null>(null);
+  const [poseError, setPoseError] = useState("");
   const activeRequestRef = useRef<string | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -456,6 +478,55 @@ function ChatPanel({
     messageEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages, streamingMessageId]);
 
+  const generateChatPose = async (): Promise<void> => {
+    if (!window.desktop || !poseProposal) {
+      return;
+    }
+    const sourceAssetId =
+      bootstrap.settings.appearance.customCharacterId;
+    if (!sourceAssetId) {
+      setPoseError("还没有选中自定义形象，请先在设置中上传并选择一个角色。");
+      return;
+    }
+    if (!bootstrap.meta.imageGenerationConfigured) {
+      setPoseError("请先在设置中配置硅基流动 API Key。");
+      return;
+    }
+
+    const requestId = crypto.randomUUID();
+    setPoseGenerating(true);
+    setPoseRequestId(requestId);
+    setPoseError("");
+    try {
+      const asset = await window.desktop.generateCharacterPose({
+        requestId,
+        sourceAssetId,
+        instruction: poseProposal.instruction,
+      });
+      setPoseCandidate(asset);
+      setPoseProposal(null);
+    } catch (error) {
+      console.error("按聊天指令生成角色姿态失败", error);
+      setPoseError(characterPoseErrorMessage(error));
+    } finally {
+      setPoseGenerating(false);
+      setPoseRequestId(null);
+    }
+  };
+
+  const cancelChatPose = async (): Promise<void> => {
+    if (!window.desktop || !poseRequestId) {
+      return;
+    }
+    setPoseError("");
+    try {
+      await window.desktop.cancelCharacterPoseGeneration(poseRequestId);
+    } catch (error) {
+      console.error("取消聊天姿态生成失败", error);
+      setPoseError("取消失败，请等待当前请求结束。");
+    }
+  };
+
   const send = async (): Promise<void> => {
     const text = draft.trim();
     if (
@@ -464,6 +535,15 @@ function ChatPanel({
       !bootstrap.meta.modelConfigured ||
       !window.desktop
     ) {
+      return;
+    }
+
+    const poseInstruction = parseCharacterPoseInstruction(text);
+    if (poseInstruction) {
+      setDraft("");
+      setPoseProposal({ originalText: text, instruction: poseInstruction });
+      setPoseCandidate(null);
+      setPoseError("");
       return;
     }
 
@@ -557,6 +637,89 @@ function ChatPanel({
                 </article>
               ))
             )}
+            {poseProposal && !poseGenerating ? (
+              <article className="chat-pose-card">
+                <span className="message-role">动作导演 · 待确认</span>
+                <strong>要把这条聊天指令变成新姿态吗？</strong>
+                <p>
+                  “{poseProposal.originalText}” → 姿态：
+                  {poseProposal.instruction}
+                </p>
+                <small>
+                  将参考当前自定义形象并发送给 {bootstrap.meta.imageGenerationModel}。
+                  可能产生平台费用；结果先预览，不会自动替换形象。
+                </small>
+                <div className="chat-pose-actions">
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={() => setPoseProposal(null)}
+                  >
+                    继续普通聊天
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={!bootstrap.meta.imageGenerationConfigured}
+                    onClick={() => void generateChatPose()}
+                  >
+                    {bootstrap.meta.imageGenerationConfigured
+                      ? "确认生成姿态"
+                      : "需先配置图像服务"}
+                  </button>
+                </div>
+              </article>
+            ) : null}
+            {poseGenerating ? (
+              <article className="chat-pose-card" role="status">
+                <span className="message-role">动作导演</span>
+                <strong>正在生成新姿态…</strong>
+                <p>原形象不会变化；完成后再由你决定是否切换。</p>
+                <div className="chat-pose-actions">
+                  <button
+                    className="danger-text-button"
+                    type="button"
+                    onClick={() => void cancelChatPose()}
+                  >
+                    取消生成
+                  </button>
+                </div>
+              </article>
+            ) : null}
+            {poseCandidate ? (
+              <article className="chat-pose-candidate">
+                <CharacterAssetThumbnail asset={poseCandidate} />
+                <div>
+                  <span className="message-role">动作导演 · 新姿态</span>
+                  <strong>{poseCandidate.generationPrompt}</strong>
+                  <small>{poseCandidate.generationModel}</small>
+                </div>
+                <div className="chat-pose-actions">
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={() => setPoseCandidate(null)}
+                  >
+                    保留候选
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => {
+                      onCharacterSelected(poseCandidate.id);
+                      setPoseCandidate(null);
+                    }}
+                  >
+                    设为桌宠
+                  </button>
+                </div>
+              </article>
+            ) : null}
+            {poseError ? (
+              <p className="inline-error" role="alert">
+                {poseError}
+              </p>
+            ) : null}
             {memoryNotice ? <p className="memory-toast">{memoryNotice}</p> : null}
             {chatError ? (
               <p className="inline-error" role="alert">
@@ -1791,6 +1954,43 @@ function SettingsPanel({
   const [embeddingMessage, setEmbeddingMessage] = useState("");
   const [personaMessage, setPersonaMessage] = useState("");
   const personaFileInput = useRef<HTMLInputElement | null>(null);
+  const [characterAssetList, setCharacterAssetList] = useState<CharacterAsset[]>(
+    [],
+  );
+  const [characterUploadView, setCharacterUploadView] =
+    useState<CharacterView>("idle");
+  const [characterMessage, setCharacterMessage] = useState("");
+  const [characterBusy, setCharacterBusy] = useState(false);
+  const [poseInstruction, setPoseInstruction] = useState("");
+  const [poseConfirmationVisible, setPoseConfirmationVisible] = useState(false);
+  const [poseGenerating, setPoseGenerating] = useState(false);
+  const [poseRequestId, setPoseRequestId] = useState<string | null>(null);
+  const [poseCandidateId, setPoseCandidateId] = useState<string | null>(null);
+  const [poseMessage, setPoseMessage] = useState("");
+  const characterFileInput = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!window.desktop) {
+      return;
+    }
+    void window.desktop
+      .listCharacterAssets()
+      .then(setCharacterAssetList)
+      .catch((error: unknown) => {
+        console.error("读取角色资产失败", error);
+        setCharacterMessage("角色资产读取失败。");
+      });
+  }, []);
+
+  const selectedCharacterAsset =
+    characterAssetList.find(
+      (asset) => asset.id === settings.appearance.customCharacterId,
+    ) ?? null;
+  const poseCandidate =
+    characterAssetList.find((asset) => asset.id === poseCandidateId) ?? null;
+  const selectedSourceSupportsPose =
+    selectedCharacterAsset !== null &&
+    selectedCharacterAsset.mimeType !== "image/gif";
 
   const saveKey = async (): Promise<void> => {
     if (!window.desktop || !keyDraft.trim()) {
@@ -1936,6 +2136,121 @@ function SettingsPanel({
     } catch (error) {
       console.error("导入人格配置失败", error);
       setPersonaMessage("导入失败：文件格式或版本不兼容。");
+    }
+  };
+
+  const uploadCharacter = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ): Promise<void> => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !window.desktop) {
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setCharacterMessage("上传失败：图片不能超过 10 MB。");
+      return;
+    }
+    setCharacterBusy(true);
+    setCharacterMessage("");
+    try {
+      const asset = await window.desktop.uploadCharacterAsset({
+        fileName: file.name,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        view: characterUploadView,
+      });
+      setCharacterAssetList(await window.desktop.listCharacterAssets());
+      onUpdate({ appearance: { customCharacterId: asset.id } });
+      setCharacterMessage(`已上传并切换到「${asset.displayName}」。`);
+    } catch (error) {
+      console.error("上传角色图片失败", error);
+      setCharacterMessage("上传失败：请使用 PNG、GIF 或 WebP 图片。");
+    } finally {
+      setCharacterBusy(false);
+    }
+  };
+
+  const deleteCharacter = async (asset: CharacterAsset): Promise<void> => {
+    if (!window.desktop) {
+      return;
+    }
+    setCharacterBusy(true);
+    try {
+      await window.desktop.deleteCharacterAsset(asset.id);
+      setCharacterAssetList(await window.desktop.listCharacterAssets());
+      if (settings.appearance.customCharacterId === asset.id) {
+        onUpdate({ appearance: { customCharacterId: null } });
+      }
+      if (poseCandidateId === asset.id) {
+        setPoseCandidateId(null);
+      }
+      setCharacterMessage(`已删除「${asset.displayName}」。`);
+    } catch (error) {
+      console.error("删除角色图片失败", error);
+      setCharacterMessage("角色图片删除失败。");
+    } finally {
+      setCharacterBusy(false);
+    }
+  };
+
+  const preparePoseGeneration = (): void => {
+    if (!selectedCharacterAsset) {
+      setPoseMessage("请先在下方选择一个自定义形象作为 AI 生成参考。");
+      return;
+    }
+    if (!selectedSourceSupportsPose) {
+      setPoseMessage("AI 姿态暂不支持 GIF，请改用 PNG、WebP 或 JPEG 形象。");
+      return;
+    }
+    if (poseInstruction.trim().length < 2) {
+      setPoseMessage("请描述希望角色做出的姿态或场景。");
+      return;
+    }
+    if (!meta.imageGenerationConfigured) {
+      setPoseMessage("请先在上方配置硅基流动 API Key。");
+      return;
+    }
+    setPoseMessage("");
+    setPoseConfirmationVisible(true);
+  };
+
+  const generatePose = async (): Promise<void> => {
+    if (!window.desktop || !selectedCharacterAsset || !selectedSourceSupportsPose) {
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    setPoseConfirmationVisible(false);
+    setPoseGenerating(true);
+    setPoseRequestId(requestId);
+    setPoseMessage("正在生成新姿态，原形象不会被覆盖…");
+    try {
+      const asset = await window.desktop.generateCharacterPose({
+        requestId,
+        sourceAssetId: selectedCharacterAsset.id,
+        instruction: poseInstruction.trim(),
+      });
+      setCharacterAssetList(await window.desktop.listCharacterAssets());
+      setPoseCandidateId(asset.id);
+      setPoseMessage("AI 姿态已生成。确认满意后再设为桌宠。");
+    } catch (error) {
+      console.error("生成角色姿态失败", error);
+      setPoseMessage(characterPoseErrorMessage(error));
+    } finally {
+      setPoseGenerating(false);
+      setPoseRequestId(null);
+    }
+  };
+
+  const cancelPoseGeneration = async (): Promise<void> => {
+    if (!window.desktop || !poseRequestId) {
+      return;
+    }
+    setPoseMessage("正在取消生成…");
+    try {
+      await window.desktop.cancelCharacterPoseGeneration(poseRequestId);
+    } catch (error) {
+      console.error("取消角色姿态生成失败", error);
+      setPoseMessage("取消失败，请等待当前请求结束。");
     }
   };
 
@@ -2087,6 +2402,231 @@ function SettingsPanel({
                   {Math.round(scale * 100)}%
                 </button>
               ))}
+            </div>
+          </div>
+          <div className="character-assets">
+            <div className="character-assets-heading">
+              <div>
+                <strong>桌宠形象</strong>
+                <p>支持透明 PNG、GIF、WebP；单张最大 10 MB。</p>
+              </div>
+              <div>
+                <select
+                  aria-label="图片视图"
+                  value={characterUploadView}
+                  onChange={(event) =>
+                    setCharacterUploadView(
+                      event.target.value as CharacterView,
+                    )
+                  }
+                >
+                  <option value="idle">待机</option>
+                  <option value="talking">说话</option>
+                  <option value="thinking">思考</option>
+                  <option value="front">正面</option>
+                  <option value="left">左侧</option>
+                  <option value="right">右侧</option>
+                  <option value="back">背面</option>
+                  <option value="sleeping">睡眠</option>
+                </select>
+                <button
+                  className="secondary-panel-button"
+                  type="button"
+                  disabled={characterBusy}
+                  onClick={() => characterFileInput.current?.click()}
+                >
+                  {characterBusy ? "处理中…" : "上传图片"}
+                </button>
+                <input
+                  ref={characterFileInput}
+                  type="file"
+                  accept="image/png,image/gif,image/webp"
+                  hidden
+                  onChange={(event) => void uploadCharacter(event)}
+                />
+              </div>
+            </div>
+            <div className="character-gallery">
+              <button
+                className={
+                  settings.appearance.customCharacterId === null
+                    ? "character-option selected"
+                    : "character-option"
+                }
+                type="button"
+                onClick={() =>
+                  onUpdate({ appearance: { customCharacterId: null } })
+                }
+              >
+                <span className="builtin-character-preview">湛</span>
+                <strong>内置阿湛</strong>
+              </button>
+              {characterAssetList.map((asset) => (
+                <article
+                  className={
+                    settings.appearance.customCharacterId === asset.id
+                      ? "character-option selected"
+                      : "character-option"
+                  }
+                  key={asset.id}
+                >
+                  <button
+                    className="character-select"
+                    type="button"
+                    onClick={() =>
+                      onUpdate({
+                        appearance: { customCharacterId: asset.id },
+                      })
+                    }
+                  >
+                    <CharacterAssetThumbnail asset={asset} />
+                    <strong>{asset.displayName}</strong>
+                    <small>
+                      {characterViewLabel(asset.view)} · {asset.width}×{asset.height}
+                    </small>
+                    {asset.origin === "ai_generated" ? (
+                      <span className="character-origin-badge">AI 姿态</span>
+                    ) : null}
+                  </button>
+                  <button
+                    className="character-delete"
+                    type="button"
+                    aria-label={`删除 ${asset.displayName}`}
+                    onClick={() => void deleteCharacter(asset)}
+                  >
+                    ×
+                  </button>
+                </article>
+              ))}
+            </div>
+            {characterMessage ? (
+              <p className="provider-message">{characterMessage}</p>
+            ) : null}
+            <div className="character-pose-director">
+              <div className="character-pose-heading">
+                <div>
+                  <strong>AI 姿态导演</strong>
+                  <p>用一句话改变姿态，生成结果先作为新形象预览。</p>
+                </div>
+                <span
+                  className={
+                    meta.imageGenerationConfigured
+                      ? "provider-status connected"
+                      : "provider-status"
+                  }
+                >
+                  {meta.imageGenerationConfigured ? "图像服务已配置" : "需配置"}
+                </span>
+              </div>
+              <textarea
+                aria-label="AI 姿态描述"
+                value={poseInstruction}
+                maxLength={500}
+                rows={3}
+                placeholder="例如：让她自然坐在一张简单的凳子上，正面全身，保持原衣着和画风。"
+                disabled={poseGenerating}
+                onChange={(event) => {
+                  setPoseInstruction(event.target.value);
+                  setPoseConfirmationVisible(false);
+                }}
+              />
+              <div className="character-pose-actions">
+                <small>
+                  {selectedCharacterAsset
+                    ? `参考形象：${selectedCharacterAsset.displayName}`
+                    : "先从画廊选择一张自定义形象。"}
+                </small>
+                <button
+                  className="secondary-panel-button"
+                  type="button"
+                  disabled={
+                    poseGenerating ||
+                    !selectedCharacterAsset ||
+                    !selectedSourceSupportsPose ||
+                    poseInstruction.trim().length < 2
+                  }
+                  onClick={preparePoseGeneration}
+                >
+                  检查并准备生成
+                </button>
+              </div>
+
+              {poseConfirmationVisible && selectedCharacterAsset ? (
+                <div
+                  className="character-pose-confirmation"
+                  role="group"
+                  aria-label="确认 AI 姿态生成"
+                >
+                  <strong>确认把参考图发送到云端并生成？</strong>
+                  <p>
+                    参考：{selectedCharacterAsset.displayName} · 姿态：
+                    {poseInstruction.trim()}
+                  </p>
+                  <p>
+                    模型：{meta.imageGenerationModel}。会向硅基流动上传这张角色参考图和姿态描述，
+                    可能按平台规则产生费用，实际以账户账单为准。
+                  </p>
+                  <p>只生成新候选，不会覆盖原图或自动切换桌宠。</p>
+                  <div className="character-pose-confirmation-actions">
+                    <button
+                      className="text-button"
+                      type="button"
+                      onClick={() => setPoseConfirmationVisible(false)}
+                    >
+                      返回修改
+                    </button>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => void generatePose()}
+                    >
+                      确认生成
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {poseGenerating ? (
+                <div className="character-pose-progress" role="status">
+                  <span>正在生成姿态，通常需要数秒到一分钟。</span>
+                  <button
+                    className="danger-text-button"
+                    type="button"
+                    onClick={() => void cancelPoseGeneration()}
+                  >
+                    取消生成
+                  </button>
+                </div>
+              ) : null}
+
+              {poseCandidate ? (
+                <div className="character-pose-candidate">
+                  <CharacterAssetThumbnail asset={poseCandidate} />
+                  <div>
+                    <strong>新姿态预览</strong>
+                    <p>{poseCandidate.generationPrompt}</p>
+                    <small>
+                      {poseCandidate.generationModel} · 原形象仍已保留
+                    </small>
+                  </div>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => {
+                      onUpdate({
+                        appearance: { customCharacterId: poseCandidate.id },
+                      });
+                      setPoseMessage("已将 AI 姿态设为桌宠，可随时从画廊切回原图。");
+                    }}
+                  >
+                    设为桌宠
+                  </button>
+                </div>
+              ) : null}
+
+              {poseMessage ? (
+                <p className="provider-message">{poseMessage}</p>
+              ) : null}
             </div>
           </div>
         </section>
@@ -2377,6 +2917,153 @@ function SettingToggle({
       </span>
     </label>
   );
+}
+
+function characterPoseErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = message.match(/CHARACTER_[A-Z_]+/)?.[0] ?? "";
+  switch (code) {
+    case "CHARACTER_POSE_NOT_CONFIGURED":
+      return "请先配置硅基流动 API Key。";
+    case "CHARACTER_POSE_SOURCE_NOT_FOUND":
+      return "参考形象已不存在，请重新选择。";
+    case "CHARACTER_POSE_SOURCE_UNSUPPORTED":
+      return "该图片格式不能用于 AI 姿态，请改用 PNG、WebP 或 JPEG。";
+    case "CHARACTER_POSE_BUSY":
+      return "已有一个姿态正在生成，请等待或先取消。";
+    case "CHARACTER_POSE_TIMEOUT":
+      return "生成超时。结果可能已在云端产生，但本应用没有自动重试。";
+    case "CHARACTER_POSE_CANCELLED":
+      return "已取消生成，当前桌宠没有变化。";
+    case "CHARACTER_POSE_RATE_LIMITED":
+      return "图像服务繁忙或额度受限，请稍后重试。";
+    case "CHARACTER_POSE_AUTH_FAILED":
+      return "硅基流动凭据无效，请重新配置 API Key。";
+    case "CHARACTER_POSE_IMAGE_INVALID":
+      return "生成结果不是可用的图片，已丢弃且未切换桌宠。";
+    case "CHARACTER_POSE_STORAGE_FAILED":
+      return "生成图片保存失败，请检查磁盘空间后重试。";
+    case "CHARACTER_POSE_RESULT_UNSAFE":
+      return "生成图片地址未通过安全检查，已停止下载。";
+    case "CHARACTER_POSE_PROVIDER_UNAVAILABLE":
+      return "图像生成服务暂时不可用，当前桌宠没有变化。";
+    default:
+      return "生成失败，当前桌宠没有变化。请检查网络或服务配置后重试。";
+  }
+}
+
+function CharacterVisual({
+  customCharacterId,
+}: {
+  customCharacterId: string | null;
+}): React.JSX.Element {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setImageUrl(null);
+    setFailed(false);
+    if (!customCharacterId || !window.desktop) {
+      return undefined;
+    }
+    let active = true;
+    let objectUrl: string | null = null;
+    void window.desktop
+      .getCharacterAssetData(customCharacterId)
+      .then(({ asset, bytes }) => {
+        if (!active) {
+          return;
+        }
+        objectUrl = URL.createObjectURL(imageBlob(bytes, asset.mimeType));
+        setImageUrl(objectUrl);
+      })
+      .catch((error: unknown) => {
+        console.error("加载自定义桌宠形象失败", error);
+        if (active) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [customCharacterId]);
+
+  if (customCharacterId && imageUrl) {
+    return (
+      <img
+        className="custom-character-image"
+        src={imageUrl}
+        alt="自定义桌宠形象"
+        draggable={false}
+      />
+    );
+  }
+  return (
+    <>
+      <AzureCharacter />
+      {failed ? <span className="character-load-error">形象读取失败</span> : null}
+    </>
+  );
+}
+
+function CharacterAssetThumbnail({
+  asset,
+}: {
+  asset: CharacterAsset;
+}): React.JSX.Element {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!window.desktop) {
+      return undefined;
+    }
+    let active = true;
+    let objectUrl: string | null = null;
+    void window.desktop
+      .getCharacterAssetData(asset.id)
+      .then(({ bytes }) => {
+        if (!active) {
+          return;
+        }
+        objectUrl = URL.createObjectURL(imageBlob(bytes, asset.mimeType));
+        setUrl(objectUrl);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [asset.id, asset.mimeType]);
+
+  return url ? (
+    <img src={url} alt="" draggable={false} />
+  ) : (
+    <span className="character-thumbnail-loading" />
+  );
+}
+
+function characterViewLabel(view: CharacterView): string {
+  return {
+    front: "正面",
+    left: "左侧",
+    right: "右侧",
+    back: "背面",
+    idle: "待机",
+    talking: "说话",
+    thinking: "思考",
+    sleeping: "睡眠",
+  }[view];
+}
+
+function imageBlob(bytes: Uint8Array, mimeType: string): Blob {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return new Blob([copy.buffer], { type: mimeType });
 }
 
 function AzureCharacter(): React.JSX.Element {

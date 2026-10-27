@@ -94,8 +94,25 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
       .fill("sk-testabcdefghijklmnopqrstuvwxyz123456");
     await window.getByRole("button", { name: "保存并启用" }).click();
     await expect(window.getByText("DeepSeek Flash 已连接").first()).toBeVisible();
+    await window
+      .locator('input[accept*="image/png"]')
+      .setInputFiles({
+        name: "pet.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl8sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      });
+    await expect(window.getByText(/已上传并切换到/)).toBeVisible();
+    await expect(window.getByText("AI 姿态导演")).toBeVisible();
+    await expect(
+      window.getByRole("button", { name: "检查并准备生成" }),
+    ).toBeDisabled();
     await window.getByLabel("角色名称").fill("测试桌宠");
-    await window.locator('input[type="file"]').setInputFiles({
+    await window
+      .locator('input[accept*="application/json"]')
+      .setInputFiles({
       name: "persona.persona.json",
       mimeType: "application/json",
       buffer: Buffer.from(
@@ -116,7 +133,7 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
           },
         }),
       ),
-    });
+      });
     await expect(window.getByLabel("角色名称")).toHaveValue("导入角色");
 
     const settingsScreenshot = testInfo.outputPath("settings-shell.png");
@@ -127,8 +144,17 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
     });
 
     await window.getByRole("button", { name: "返回桌宠" }).click();
+    await expect(window.getByAltText("自定义桌宠形象")).toBeVisible();
     await window.getByRole("button", { name: "开始聊天" }).click();
     await expect(window.getByRole("heading", { name: "导入角色 在听" })).toBeVisible();
+    await window
+      .getByPlaceholder(/和导入角色说点什么/)
+      .fill("让她坐在凳子上");
+    await window.getByRole("button", { name: "发送" }).click();
+    await expect(window.getByText("要把这条聊天指令变成新姿态吗？")).toBeVisible();
+    await expect(
+      window.getByRole("button", { name: "需先配置图像服务" }),
+    ).toBeDisabled();
 
     const chatScreenshot = testInfo.outputPath("chat-shell.png");
     await window.screenshot({ path: chatScreenshot });

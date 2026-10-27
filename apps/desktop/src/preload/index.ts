@@ -10,6 +10,8 @@ import type { DesktopSettings, DesktopSettingsPatch } from "../shared/settings";
 import type {
   CreateTaskInput,
   AuditLogRecord,
+  CharacterAsset,
+  CharacterView,
   ConnectorRecord,
   DailyBriefRecord,
   MemorySearchResult,
@@ -130,6 +132,43 @@ const desktopApi: DesktopApi = {
       query,
       limit,
     ) as Promise<AuditLogRecord[]>,
+  listCharacterAssets: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.listCharacterAssets) as Promise<
+      CharacterAsset[]
+    >,
+  uploadCharacterAsset: (input: {
+    fileName: string;
+    bytes: Uint8Array;
+    view: CharacterView;
+    displayName?: string;
+  }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.uploadCharacterAsset,
+      input,
+    ) as Promise<CharacterAsset>,
+  getCharacterAssetData: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.getCharacterAssetData, id) as Promise<{
+      asset: CharacterAsset;
+      bytes: Uint8Array;
+    }>,
+  deleteCharacterAsset: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.deleteCharacterAsset, id) as Promise<{
+      deleted: boolean;
+    }>,
+  generateCharacterPose: (input: {
+    requestId: string;
+    sourceAssetId: string;
+    instruction: string;
+  }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.generateCharacterPose,
+      input,
+    ) as Promise<CharacterAsset>,
+  cancelCharacterPoseGeneration: (requestId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.cancelCharacterPoseGeneration,
+      requestId,
+    ) as Promise<{ cancelled: boolean }>,
   quit: () => ipcRenderer.invoke(IPC_CHANNELS.quit) as Promise<void>,
   onSettingsChanged: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, settings: DesktopSettings) => {

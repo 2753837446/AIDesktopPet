@@ -2,7 +2,7 @@
 
 *SQLite 数据模型、SQL 草案、索引策略、一致性、隐私与迁移规范*
 
-版本 V0.2 · 2026-10-27
+版本 V0.3 · 2026-10-27
 
 # 1. 设计约束
 
@@ -41,6 +41,52 @@
 | audit_logs | 权限、记忆修改、工具执行等审计 | 可按 trace_id 检索 |
 | settings | 非敏感用户配置 | 敏感密钥单独存储 |
 | cleanup_jobs | 异步清理索引、缓存和派生数据 | 可重试、可观测 |
+| character_assets | 上传与 AI 生成角色图片的元数据、来源和血缘 | 二进制文件保存在受控 userData 目录 |
+
+## 2.1 当前角色资产实际模型（migration v8）
+
+```sql
+CREATE TABLE character_assets (
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  view TEXT NOT NULL DEFAULT 'idle' CHECK(view IN
+    ('front','left','right','back','idle','talking','thinking','sleeping')),
+  mime_type TEXT NOT NULL CHECK(mime_type IN
+    ('image/png','image/gif','image/webp','image/jpeg')),
+  width INTEGER NOT NULL CHECK(width > 0),
+  height INTEGER NOT NULL CHECK(height > 0),
+  size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+  file_path TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'upload'
+    CHECK(origin IN ('upload','ai_generated')),
+  source_asset_id TEXT,
+  generation_prompt TEXT,
+  generation_model TEXT,
+  generated_at TEXT,
+  created_at TEXT NOT NULL,
+  CHECK (
+    (origin = 'upload'
+      AND source_asset_id IS NULL
+      AND generation_prompt IS NULL
+      AND generation_model IS NULL
+      AND generated_at IS NULL)
+    OR
+    (origin = 'ai_generated'
+      AND source_asset_id IS NOT NULL
+      AND generation_prompt IS NOT NULL
+      AND generation_model IS NOT NULL
+      AND generated_at IS NOT NULL)
+  )
+);
+CREATE INDEX idx_character_assets_created ON character_assets(created_at);
+CREATE INDEX idx_character_assets_source ON character_assets(source_asset_id);
+```
+
+- v8 将从 v7 的上传资产原样迁移为 `origin=upload`。
+- AI 姿态结果保存为新行，不覆盖源资产；源资产删除后派生图仍可独立展示。
+- 二进制文件仍按 UUID 存放于 `userData/character-assets/`，SQLite 不保存图片正文。
+- `source_asset_id` 由应用层校验，不设置级联删除，避免删除原图时连带丢失用户已保留的生成候选。
+- JPEG 仅用于兼容图像编辑服务输出；上传入口仍只接受 PNG / GIF / WebP。
 
 # 3. 核心 SQL 草案
 

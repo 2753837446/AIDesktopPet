@@ -6,6 +6,8 @@ import type {
 import type {
   AssistantStreamEvent,
   AuditLogRecord,
+  CharacterAsset,
+  CharacterView,
   ConnectorRecord,
   CreateTaskInput,
   DailyBriefRecord,
@@ -27,6 +29,8 @@ export interface DesktopBootstrap {
     modelName: string;
     embeddingConfigured: boolean;
     embeddingModel: string;
+    imageGenerationConfigured: boolean;
+    imageGenerationModel: string;
     conversationId: string | null;
     database: {
       ready: boolean;
@@ -84,6 +88,26 @@ export interface DesktopApi {
   cancelTool(callId: string): Promise<{ cancelled: boolean }>;
   listConnectors(): Promise<ConnectorRecord[]>;
   listAuditLogs(query?: string, limit?: number): Promise<AuditLogRecord[]>;
+  listCharacterAssets(): Promise<CharacterAsset[]>;
+  uploadCharacterAsset(input: {
+    fileName: string;
+    bytes: Uint8Array;
+    view: CharacterView;
+    displayName?: string;
+  }): Promise<CharacterAsset>;
+  getCharacterAssetData(id: string): Promise<{
+    asset: CharacterAsset;
+    bytes: Uint8Array;
+  }>;
+  deleteCharacterAsset(id: string): Promise<{ deleted: boolean }>;
+  generateCharacterPose(input: {
+    requestId: string;
+    sourceAssetId: string;
+    instruction: string;
+  }): Promise<CharacterAsset>;
+  cancelCharacterPoseGeneration(
+    requestId: string,
+  ): Promise<{ cancelled: boolean }>;
   quit(): Promise<void>;
   onSettingsChanged(listener: (settings: DesktopSettings) => void): () => void;
   onOpenSettings(listener: () => void): () => void;
@@ -119,6 +143,12 @@ export const IPC_CHANNELS = {
   cancelTool: "tools:cancel",
   listConnectors: "connectors:list",
   listAuditLogs: "audit:list",
+  listCharacterAssets: "characters:list",
+  uploadCharacterAsset: "characters:upload",
+  getCharacterAssetData: "characters:get-data",
+  deleteCharacterAsset: "characters:delete",
+  generateCharacterPose: "characters:generate-pose",
+  cancelCharacterPoseGeneration: "characters:cancel-pose",
   quit: "desktop:quit",
   settingsChanged: "desktop:settings-changed",
   openSettings: "desktop:open-settings",

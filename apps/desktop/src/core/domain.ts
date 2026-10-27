@@ -242,3 +242,37 @@ export interface AuditLogRecord {
   reason: string | null;
   traceId: string | null;
 }
+
+export type CharacterView =
+  | "front"
+  | "left"
+  | "right"
+  | "back"
+  | "idle"
+  | "talking"
+  | "thinking"
+  | "sleeping";
+
+export type CharacterImageMimeType =
+  | "image/png"
+  | "image/gif"
+  | "image/webp"
+  | "image/jpeg";
+
+export type CharacterAssetOrigin = "upload" | "ai_generated";
+
+export interface CharacterAsset {
+  id: string;
+  displayName: string;
+  view: CharacterView;
+  mimeType: CharacterImageMimeType;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  origin: CharacterAssetOrigin;
+  sourceAssetId: string | null;
+  generationPrompt: string | null;
+  generationModel: string | null;
+  generatedAt: string | null;
+  createdAt: string;
+}

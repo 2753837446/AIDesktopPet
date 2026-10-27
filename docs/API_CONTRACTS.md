@@ -2,7 +2,7 @@
 
 *Assistant Core、Memory Service、Task Engine、Tool Runtime 与 Connector 的接口草案*
 
-版本 V0.2 · 2026-10-27
+版本 V0.3 · 2026-10-27
 
 # 1. 设计原则
 
@@ -345,6 +345,58 @@ interface ConnectorActionResult {
 }
 ```
 
+# 8.1 Character Asset
+
+```text
+type CharacterView =
+  | "front" | "left" | "right" | "back"
+  | "idle" | "talking" | "thinking" | "sleeping";
+type CharacterAssetOrigin = "upload" | "ai_generated";
+
+interface CharacterAsset {
+  id: UUID;
+  displayName: string;
+  view: CharacterView;
+  mimeType: "image/png" | "image/gif" | "image/webp" | "image/jpeg";
+  width: number;
+  height: number;
+  sizeBytes: number;
+  origin: CharacterAssetOrigin;
+  sourceAssetId: UUID | null;
+  generationPrompt: string | null;
+  generationModel: string | null;
+  generatedAt: ISODateTime | null;
+  createdAt: ISODateTime;
+}
+
+uploadCharacterAsset(input: {
+  fileName: string;
+  bytes: Uint8Array;
+  view: CharacterView;
+  displayName?: string;
+}): Promise<Result<CharacterAsset>>;
+
+listCharacterAssets(): Promise<Result<CharacterAsset[]>>;
+getCharacterAssetData(id: UUID): Promise<Result<{ asset: CharacterAsset; bytes: Uint8Array }>>;
+deleteCharacterAsset(id: UUID): Promise<Result<{ deleted: boolean }>>;
+generateCharacterPose(input: {
+  requestId: UUID;
+  sourceAssetId: UUID;
+  instruction: string; // 2-500 chars
+}): Promise<Result<CharacterAsset>>;
+cancelCharacterPoseGeneration(requestId: UUID): Promise<Result<{ cancelled: boolean }>>;
+```
+
+上传只允许 PNG、GIF、WebP，最大 10 MiB、4096×4096；拒绝 SVG 和脚本格式。上传、读取和删除均经过可信 renderer 校验。图像编辑输出额外兼容 JPEG，但必须重新校验魔数、尺寸和大小。
+
+AI 姿态规则：
+
+- 只使用当前选中的 PNG / WebP / JPEG 角色资产；GIF 暂不支持姿态编辑。
+- 单次只允许一个付费生成任务，总超时 120 秒，并支持 AbortController 取消。
+- 图像模型固定为 `Qwen/Qwen-Image-Edit-2509`；请求只包含单张参考图、固定保真模板和用户姿态描述。
+- 结果 URL 只接受公网 HTTPS，下载后保存为新的 `ai_generated` 资产；不覆盖源资产、不自动切换桌宠。
+- 生成成功、失败和取消写入审计；审计不保存参考图、完整提示词、密钥或模型响应正文。
+
 # 9. 错误码建议
 
 | 错误码 | 含义 | 是否可重试 |
@@ -365,6 +417,17 @@ interface ConnectorActionResult {
 | CONNECTOR_UNAVAILABLE | 连接器暂不可用 | 视错误而定 |
 | IDEMPOTENCY_CONFLICT | 幂等键重复且载荷冲突 | 否，检查调用逻辑 |
 | DATABASE_MIGRATION_FAILED | 数据库迁移失败 | 否，先诊断 / 恢复 |
+| CHARACTER_POSE_NOT_CONFIGURED | 尚未配置图像编辑服务 | 配置后可重试 |
+| CHARACTER_POSE_SOURCE_NOT_FOUND | 参考角色资产不存在 | 否，重新选择 |
+| CHARACTER_POSE_SOURCE_UNSUPPORTED | 当前角色格式不支持姿态编辑 | 否，改用 PNG/WebP/JPEG |
+| CHARACTER_POSE_BUSY | 已有生成任务进行中 | 等待或取消后重试 |
+| CHARACTER_POSE_TIMEOUT | 角色姿态生成超时 | 用户确认后重试，不自动重试 |
+| CHARACTER_POSE_CANCELLED | 用户取消生成 | 仅用户主动重试时 |
+| CHARACTER_POSE_RATE_LIMITED | 图像服务限流或额度受限 | 是，退避后由用户重试 |
+| CHARACTER_POSE_AUTH_FAILED | 图像服务凭据无效 | 否，重新配置 Key |
+| CHARACTER_POSE_RESULT_UNSAFE | 结果 URL 未通过公网 HTTPS 检查 | 否 |
+| CHARACTER_POSE_IMAGE_INVALID | 返回内容不是可用图片 | 可重新生成 |
+| CHARACTER_POSE_STORAGE_FAILED | 生成图片保存失败 | 检查磁盘后重试 |
 
 # 10. 取消、超时与重试规范
 
@@ -380,6 +443,8 @@ interface ConnectorActionResult {
 | --- | --- |
 | 单条用户消息 | 32,000 字符，超过时由 UI 拒绝并提示拆分 |
 | 单个附件引用 | 20 MB 仅表示引用大小；实际读取前再次校验 |
+| 角色图片 | 上传和生成结果均最大 10 MiB、4096×4096 |
+| 角色姿态描述 | 2–500 字符 |
 | 每次消息附件数量 | 10 |
 | Memory `topK` | 默认 8，最大 20 |
 | Page `limit` | 默认 20，最大 100 |

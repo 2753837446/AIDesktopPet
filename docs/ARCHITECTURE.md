@@ -2,7 +2,7 @@
 
 *逻辑分层、数据流、存储、适配器、安全、恢复和演进路线*
 
-版本：V0.2 · 日期：2026-10-27
+版本：V0.3 · 日期：2026-10-27
 
 # 1. 架构目标
 
@@ -29,6 +29,12 @@ Windows Desktop App
        │    ├─ Permission / Risk Gate
        │    ├─ Timeout / Cancellation / Reconciliation
        │    └─ Execution Audit
+       ├─ Character Runtime
+       │    ├─ Image / GIF Adapter
+       │    ├─ AI Pose Director
+       │    ├─ Sprite Sheet Adapter
+       │    ├─ Rigged 2D Adapter
+       │    └─ Optional GLB 3D Adapter
        ├─ Memory Service
        │    ├─ Candidate Extractor
        │    ├─ Conflict / Dedup / Versioning
@@ -72,8 +78,9 @@ Windows Desktop App
 | Memory Service | 候选记忆、版本、冲突、混合检索、索引 | 定时提醒与任务执行 |
 | Task Engine | 调度、事件、状态机、重试、通知 | 自由决定用户目标 |
 | Tool Runtime | 工具注册、参数校验、权限、执行日志 | 绕过权限直接执行高风险操作 |
-| Model Adapter | LLM / embedding 请求与响应转换 | 业务规则和用户授权 |
+| Model Adapter | LLM / embedding / image-edit 请求与响应转换 | 业务规则和用户授权 |
 | Connector | 对外部系统进行授权访问 | 擅自扩大访问范围 |
+| Character Runtime | 角色状态、形象切换、多视图与动作适配 | 记忆、任务和外部权限 |
 | Persistence | 结构化数据、全文 / 向量索引、审计 | 在索引失败时丢弃原始数据 |
 
 # 5. 核心数据流
@@ -106,6 +113,16 @@ Windows Desktop App
 4. Executor 执行确定性动作；需要理解和总结时调用 Assistant Core。
 5. 记录结果、错误、重试与审计日志。
 6. Notifier 向桌宠 UI 和系统通知呈现结果。
+
+## 5.4 AI 角色姿态
+
+1. 聊天确定性识别或设置页输入生成姿态描述；不在识别阶段调用外部服务。
+2. UI 展示当前参考资产、姿态描述、图像模型、云端上传、可能费用和“只生成候选”说明。
+3. 用户确认后，主进程读取受控角色资产，通过独立 `CharacterImageEditProvider` 发送单张参考图和固定保真模板。
+4. Provider 运行时校验返回结构；结果 URL 必须为公网 HTTPS，并立即下载，不依赖临时链接。
+5. 图片重新校验魔数、尺寸和 10 MiB 上限后保存为 `origin=ai_generated` 的新资产。
+6. 生成结果不修改 `appearance.customCharacterId`；用户预览并点击“设为桌宠”后才切换。
+7. 原图与历史候选保留，派生资产记录 `source_asset_id`、提示词、模型和生成时间；生成操作写入审计。
 
 # 6. 存储方案
 
@@ -140,6 +157,16 @@ Windows Desktop App
 - `local_only` 数据只能进入本地处理链路；Context Builder 必须知道本次模型目标是本地还是云端，并在组装前完成过滤。
 - 删除记忆后立即从所有读取路径和缓存中阻断，索引和派生摘要的物理清理可以进入异步清理队列。
 
+## 7.5 角色展现边界
+
+- UI 只依赖统一的 Character Runtime 状态接口：`idle / talking / thinking / dragging / happy / sleepy`。
+- 当前支持静态图片、GIF 和单张 AI 姿态候选；后续可增加 Sprite Sheet、分层骨骼 2D 和 GLB 3D 适配器。
+- `CharacterImageEditProvider` 与聊天模型隔离，只接收参考图、姿态描述和固定模板，不读取会话、记忆、密钥或其他私人数据。
+- AI 姿态是有来源的单帧资产，不是自动绑定骨骼或可自由驱动的 3D 模型。连续动作需要动作关键帧、Sprite Sheet 或真正的 GLB 骨架与动画 Clip。
+- 多视图图片可作为 2D 转向和 3D 制作参考，但不能直接被视为自动绑定、自动动画的 3D 模型。
+- 角色资产必须校验类型、大小、尺寸、版本和允许字段，不执行包内代码。
+- 角色渲染失败时回退内置角色，不阻塞聊天和任务。
+
 # 8. 安全架构
 
 - 所有工具调用通过 Tool Runtime，不能由模型直接访问任意系统资源。
@@ -160,6 +187,8 @@ Windows Desktop App
 | 向量索引损坏 | 从有效记忆记录重建，不丢弃原始记录 |
 | 任务执行中应用崩溃 | 启动时检查任务租约和状态，按幂等策略恢复 |
 | 连接器失效 | 显示授权 / 网络状态，不虚构外部数据 |
+| 图像编辑超时 / 取消 | 停止等待，保留当前形象；已提交的云端请求不自动重试 |
+| 图像结果非法或地址不安全 | 丢弃结果并记录错误；不写入资产目录、不切换形象 |
 | Agent runtime 不可用 | 保留桌宠 UI、本地记忆与任务面板的基本可用性 |
 | 数据库迁移失败 | 停止破坏性写入，提示恢复 / 备份路径 |
 
