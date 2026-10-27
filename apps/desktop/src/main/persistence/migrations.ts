@@ -447,4 +447,42 @@ export const migrations: Migration[] = [
         ON character_assets(category, created_at);
     `,
   },
+  {
+    version: 10,
+    name: "bundled character preset identity",
+    sql: `
+      ALTER TABLE character_assets ADD COLUMN preset_key TEXT;
+      CREATE UNIQUE INDEX idx_character_assets_preset_key
+        ON character_assets(preset_key)
+        WHERE preset_key IS NOT NULL;
+    `,
+  },
+  {
+    version: 11,
+    name: "local calendar connector",
+    sql: `
+      CREATE TABLE calendar_events (
+        id TEXT PRIMARY KEY,
+        connector_id TEXT NOT NULL,
+        external_uid TEXT NOT NULL,
+        source_name TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        location TEXT NOT NULL DEFAULT '',
+        starts_at TEXT NOT NULL,
+        ends_at TEXT NOT NULL,
+        timezone TEXT NOT NULL,
+        imported_at TEXT NOT NULL,
+        UNIQUE(external_uid, starts_at)
+      );
+      CREATE INDEX idx_calendar_events_start
+        ON calendar_events(starts_at);
+      INSERT OR IGNORE INTO connectors
+        (id, provider, display_name, status, granted_scopes_json,
+         created_at, updated_at)
+      VALUES
+        ('calendar-local', 'ics', '本地日历 ICS', 'disconnected', '[]',
+         datetime('now'), datetime('now'));
+    `,
+  },
 ];

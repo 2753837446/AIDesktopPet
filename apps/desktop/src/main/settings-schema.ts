@@ -31,6 +31,22 @@ export const desktopSettingsSchema = z
             end: clockTime,
           })
           .strict(),
+        categories: z
+          .object({
+            task: z.boolean().default(true),
+            email: z.boolean().default(true),
+            calendar: z.boolean().default(true),
+            dailyBrief: z.boolean().default(true),
+            system: z.boolean().default(true),
+          })
+          .strict()
+          .default(DEFAULT_SETTINGS.proactive.categories),
+        dailyLimit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(DEFAULT_SETTINGS.proactive.dailyLimit),
       })
       .strict(),
     startup: z
@@ -102,6 +118,17 @@ export const desktopSettingsPatchSchema = z
           })
           .strict()
           .optional(),
+        categories: z
+          .object({
+            task: z.boolean().optional(),
+            email: z.boolean().optional(),
+            calendar: z.boolean().optional(),
+            dailyBrief: z.boolean().optional(),
+            system: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+        dailyLimit: z.number().int().min(1).max(100).optional(),
       })
       .strict()
       .optional(),
@@ -176,6 +203,10 @@ export function mergeSettings(
       quietHours: {
         ...current.proactive.quietHours,
         ...patch.proactive?.quietHours,
+      },
+      categories: {
+        ...current.proactive.categories,
+        ...patch.proactive?.categories,
       },
     },
     startup: {

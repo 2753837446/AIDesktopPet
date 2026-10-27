@@ -1,23 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
-import { TaskEngine, type TaskNotificationSink } from "../src/core/task-engine";
+import {
+  TaskEngine,
+  type NotificationDeliveryResult,
+  type TaskNotificationSink,
+} from "../src/core/task-engine";
+import type { NotificationCategory } from "../src/core/notification-policy";
 import { openDatabase } from "../src/main/persistence/database";
 import { SqliteTaskRepository } from "../src/main/persistence/task-repository";
 
 class FakeNotificationSink implements TaskNotificationSink {
-  readonly notifications: Array<{ title: string; body: string; dedupeKey: string }> = [];
+  readonly notifications: Array<{
+    title: string;
+    body: string;
+    dedupeKey: string;
+    category: NotificationCategory;
+  }> = [];
   shouldFail = false;
+  suppressedReason: string | null = null;
 
   async notify(input: {
     title: string;
     body: string;
     dedupeKey: string;
     taskId: string;
-  }): Promise<void> {
+    category: NotificationCategory;
+  }): Promise<NotificationDeliveryResult> {
     if (this.shouldFail) {
       throw new Error("通知服务不可用");
     }
     this.notifications.push(input);
+    return this.suppressedReason
+      ? { status: "suppressed", reason: this.suppressedReason }
+      : { status: "sent" };
   }
 }
 
@@ -77,6 +92,33 @@ describe("TaskEngine", () => {
     expect(secondRun).toEqual([]);
     expect(sink.notifications).toHaveLength(1);
     expect(sink.notifications[0]?.dedupeKey).toBe(`task-due:${task.id}`);
+    expect(sink.notifications[0]?.category).toBe("task");
+  });
+
+  it("通知被策略抑制时任务仍完成且不进入重试", async () => {
+    const now = new Date("2026-10-27T08:00:00.000Z");
+    sink.suppressedReason = "quiet_hours";
+    const task = engine.createTask({
+      title: "静默提醒",
+      dueAt: new Date(now.getTime() - 1_000).toISOString(),
+      timezone: "Asia/Shanghai",
+      idempotencyKey: "quiet-task-once",
+    });
+
+    const [completed] = await engine.runDueTasks(now);
+    expect(completed).toMatchObject({ id: task.id, status: "completed" });
+    const notification = database
+      .prepare(
+        "SELECT status, user_action FROM notifications WHERE dedupe_key = ?",
+      )
+      .get(`task-due:${task.id}`) as {
+      status: string;
+      user_action: string | null;
+    };
+    expect(notification).toEqual({
+      status: "dismissed",
+      user_action: "suppressed:quiet_hours",
+    });
   });
 
   it("通知失败会进入有限次数重试", async () => {

@@ -23,7 +23,7 @@ describe("核心 SQLite 持久化", () => {
   });
 
   it("执行初始迁移并持久化会话消息", () => {
-    expect(opened.schemaVersion).toBe(9);
+    expect(opened.schemaVersion).toBe(11);
     const conversation = conversations.ensureConversation({});
     const user = conversations.appendMessage({
       conversationId: conversation.id,

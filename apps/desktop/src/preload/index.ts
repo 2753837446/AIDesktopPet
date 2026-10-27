@@ -173,6 +173,29 @@ const desktopApi: DesktopApi = {
       IPC_CHANNELS.cancelCharacterPoseGeneration,
       requestId,
     ) as Promise<{ cancelled: boolean }>,
+  createBackup: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.createBackup) as Promise<{
+      cancelled: boolean;
+      directory?: string;
+      fileCount?: number;
+    }>,
+  restoreBackup: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.restoreBackup) as Promise<{
+      cancelled: boolean;
+      restarting?: boolean;
+    }>,
+  importCalendarIcs: (input: {
+    fileName: string;
+    bytes: Uint8Array;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.importCalendarIcs, input) as Promise<{
+      sourceName: string;
+      imported: number;
+      skipped: number;
+      total: number;
+      importedAt: string;
+      eventCount: number;
+    }>,
   quit: () => ipcRenderer.invoke(IPC_CHANNELS.quit) as Promise<void>,
   onSettingsChanged: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, settings: DesktopSettings) => {

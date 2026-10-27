@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type {
+  ModelToolDefinition,
   RiskLevel,
   ToolCallRecord,
   ToolCallStatus,
@@ -31,6 +32,7 @@ export interface ToolDefinition {
   requiredScopes: string[];
   timeoutMs: number;
   requiresConfirmation?: boolean;
+  modelCallable?: boolean;
   execute(input: unknown, context: ToolExecutionContext): Promise<ToolExecutionResult>;
 }
 
@@ -73,6 +75,26 @@ export class ToolRuntime {
     }));
   }
 
+  listModelTools(): ModelToolDefinition[] {
+    return [...this.tools.values()]
+      .filter(
+        (tool) =>
+          tool.modelCallable === true &&
+          (tool.riskLevel === "low" || tool.riskLevel === "medium"),
+      )
+      .map((tool) => {
+        const { $schema: _schema, ...parameters } = z.toJSONSchema(
+          tool.inputSchema,
+          { target: "draft-7" },
+        ) as Record<string, unknown>;
+        return {
+          name: tool.name,
+          description: tool.description,
+          parameters,
+        };
+      });
+  }
+
   listCalls(limit = 100): ToolCallRecord[] {
     return this.repository.list(limit);
   }
@@ -81,6 +103,7 @@ export class ToolRuntime {
     requestId: string;
     toolName: string;
     input: unknown;
+    signal?: AbortSignal;
   }): Promise<ToolCallRecord> {
     const existing = this.repository.getByRequestId(input.requestId);
     if (existing) {
@@ -144,7 +167,7 @@ export class ToolRuntime {
     }
 
     this.repository.create(record, input.input);
-    return this.execute(record, tool, parsed.data, input.input);
+    return this.execute(record, tool, parsed.data, input.input, input.signal);
   }
 
   async approve(callId: string, approved: boolean): Promise<ToolCallRecord> {
@@ -216,6 +239,7 @@ export class ToolRuntime {
     tool: ToolDefinition,
     input: unknown,
     _originalInput: unknown,
+    signal?: AbortSignal,
   ): Promise<ToolCallRecord> {
     const startedAt = new Date().toISOString();
     record.status = "running";
@@ -245,6 +269,13 @@ export class ToolRuntime {
         );
       },
     });
+    const cancelFromParent = (): void => {
+      this.cancel(record.id);
+    };
+    signal?.addEventListener("abort", cancelFromParent, { once: true });
+    if (signal?.aborted) {
+      cancelFromParent();
+    }
 
     try {
       const result = await Promise.race([
@@ -293,6 +324,7 @@ export class ToolRuntime {
       return record;
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", cancelFromParent);
       this.activeExecutions.delete(record.id);
     }
   }

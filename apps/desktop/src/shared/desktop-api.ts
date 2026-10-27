@@ -33,6 +33,8 @@ export interface DesktopBootstrap {
     embeddingModel: string;
     imageGenerationConfigured: boolean;
     imageGenerationModel: string;
+    calendarConnected: boolean;
+    calendarEventCount: number;
     conversationId: string | null;
     database: {
       ready: boolean;
@@ -112,6 +114,26 @@ export interface DesktopApi {
   cancelCharacterPoseGeneration(
     requestId: string,
   ): Promise<{ cancelled: boolean }>;
+  createBackup(): Promise<{
+    cancelled: boolean;
+    directory?: string;
+    fileCount?: number;
+  }>;
+  restoreBackup(): Promise<{
+    cancelled: boolean;
+    restarting?: boolean;
+  }>;
+  importCalendarIcs(input: {
+    fileName: string;
+    bytes: Uint8Array;
+  }): Promise<{
+    sourceName: string;
+    imported: number;
+    skipped: number;
+    total: number;
+    importedAt: string;
+    eventCount: number;
+  }>;
   quit(): Promise<void>;
   onSettingsChanged(listener: (settings: DesktopSettings) => void): () => void;
   onOpenSettings(listener: () => void): () => void;
@@ -153,6 +175,9 @@ export const IPC_CHANNELS = {
   deleteCharacterAsset: "characters:delete",
   generateCharacterPose: "characters:generate-pose",
   cancelCharacterPoseGeneration: "characters:cancel-pose",
+  createBackup: "backup:create",
+  restoreBackup: "backup:restore",
+  importCalendarIcs: "calendar:import-ics",
   quit: "desktop:quit",
   settingsChanged: "desktop:settings-changed",
   openSettings: "desktop:open-settings",

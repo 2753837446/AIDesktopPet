@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { CreateTaskInput, TaskRecord } from "./domain";
+import type { NotificationCategory } from "./notification-policy";
 import type { SqliteTaskRepository } from "../main/persistence/task-repository";
+
+export type NotificationDeliveryResult =
+  | { status: "sent" }
+  | { status: "suppressed"; reason: string };
 
 export interface TaskNotificationSink {
   notify(input: {
@@ -8,7 +13,8 @@ export interface TaskNotificationSink {
     body: string;
     dedupeKey: string;
     taskId: string;
-  }): Promise<void>;
+    category: NotificationCategory;
+  }): Promise<NotificationDeliveryResult>;
 }
 
 export type TaskExecutor = (task: TaskRecord) => Promise<void>;
@@ -100,18 +106,28 @@ export class TaskEngine {
         }
         if (!this.repository.hasNotification(dedupeKey)) {
           const body = task.description || `任务「${task.title}」已到期。`;
-          await this.notifications.notify({
+          const category: NotificationCategory =
+            task.actionType === "daily_brief" ? "daily_brief" : "task";
+          const delivery = await this.notifications.notify({
             title: "桌宠任务提醒",
             body,
             dedupeKey,
             taskId: task.id,
+            category,
           });
+          const suppressed =
+            delivery.status === "suppressed"
+              ? `suppressed:${delivery.reason}`
+              : null;
           this.repository.recordNotification({
             task,
+            category,
             dedupeKey,
             title: "桌宠任务提醒",
             body,
-            status: "sent",
+            status:
+              delivery.status === "sent" ? "sent" : "dismissed",
+            userAction: suppressed,
             now: nowIso,
           });
         }

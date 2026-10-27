@@ -137,6 +137,38 @@ describe("BGE-M3 混合检索与每日总结", () => {
     expect(model.calls).toBe(0);
   });
 
+  it("连接日历时使用真实日程并标记数据源可用", async () => {
+    const model = new FakeSummaryModel();
+    const service = new DailyBriefService(
+      memoryService,
+      () => [],
+      new SqliteDailyBriefRepository(database),
+      model,
+      () => ({
+        connected: true,
+        events: [
+          {
+            id: "event-1",
+            externalUid: "work.ics:meeting-1",
+            sourceName: "work.ics",
+            title: "产品评审",
+            description: "",
+            location: "三楼会议室",
+            startsAt: new Date().toISOString(),
+            endsAt: new Date(Date.now() + 3_600_000).toISOString(),
+            timezone: "Asia/Shanghai",
+            importedAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+
+    const brief = await service.generate(new Date());
+
+    expect(brief.sourceStatus.calendar).toBe("available");
+    expect(model.calls).toBe(1);
+  });
+
   it("按指定时区计算日期", () => {
     expect(
       dateInTimezone(new Date("2026-10-27T16:30:00.000Z"), "Asia/Shanghai"),

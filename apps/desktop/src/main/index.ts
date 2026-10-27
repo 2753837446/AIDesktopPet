@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   Menu,
   Notification as ElectronNotification,
@@ -20,8 +21,12 @@ import { DailyBriefService } from "../core/daily-brief-service";
 import { DeepSeekProvider } from "../core/deepseek-provider";
 import { HimalayaEmailConnector } from "../core/email-connector";
 import { MemoryService } from "../core/memory-service";
+import { decideNotification } from "../core/notification-policy";
 import { SiliconFlowEmbeddingProvider } from "../core/siliconflow-embedding-provider";
-import { TaskEngine } from "../core/task-engine";
+import {
+  TaskEngine,
+  type NotificationDeliveryResult,
+} from "../core/task-engine";
 import {
   StaticPermissionPolicy,
   ToolRuntime,
@@ -32,9 +37,15 @@ import type { DesktopSettingsPatch, DesktopWindowMode } from "../shared/settings
 import { CredentialStore } from "./credential-store";
 import { CharacterAssetService } from "./character-asset-service";
 import { CharacterPoseDirector } from "./character-pose-director";
+import { BackupService } from "./backup-service";
+import {
+  BundledCharacterPresetService,
+  createPresetSettingsPatch,
+} from "./character-preset-service";
 import { createTrayIcon } from "./icon";
 import { openDatabase, type OpenedDatabase } from "./persistence/database";
 import { SqliteAuditRepository } from "./persistence/audit-repository";
+import { SqliteCalendarRepository } from "./persistence/calendar-repository";
 import { SqliteCharacterAssetRepository } from "./persistence/character-asset-repository";
 import { SqliteConversationRepository } from "./persistence/conversation-repository";
 import { SqliteConnectorRepository } from "./persistence/connector-repository";
@@ -43,6 +54,7 @@ import { SqliteMemoryRepository } from "./persistence/memory-repository";
 import { SqliteTaskRepository } from "./persistence/task-repository";
 import { SqliteToolCallRepository } from "./persistence/tool-call-repository";
 import { SettingsStore } from "./settings-store";
+import { LocalCalendarService } from "./local-calendar-service";
 
 const APP_ID = "com.aidesktoppet.desktop";
 const WINDOW_BOUNDS_DEBOUNCE_MS = 250;
@@ -59,6 +71,7 @@ let taskEngine: TaskEngine | null = null;
 let dailyBriefService: DailyBriefService | null = null;
 let toolRuntime: ToolRuntime | null = null;
 let connectorRepository: SqliteConnectorRepository | null = null;
+let calendarService: LocalCalendarService | null = null;
 let characterAssets: CharacterAssetService | null = null;
 let characterPoseDirector: CharacterPoseDirector | null = null;
 let auditRepository: SqliteAuditRepository | null = null;
@@ -105,6 +118,32 @@ app.whenReady().then(async () => {
         credentialStore.getProviderKey("siliconflow"),
       ),
     );
+    try {
+      const presets = await new BundledCharacterPresetService(
+        characterAssets,
+        app.isPackaged
+          ? path.join(process.resourcesPath, "character-presets")
+          : path.join(app.getAppPath(), "resources", "character-presets"),
+      ).importAll();
+      const suQingyue = presets.find(
+        (preset) => preset.manifest.key === "su-qingyue",
+      );
+      if (suQingyue && suQingyue.importedKeys.length > 0) {
+        const knownAssetIds = new Set(
+          characterAssets.list().map((asset) => asset.id),
+        );
+        const patch = createPresetSettingsPatch(
+          settingsStore.get(),
+          suQingyue,
+          knownAssetIds,
+        );
+        if (Object.keys(patch).length > 0) {
+          await settingsStore.update(patch);
+        }
+      }
+    } catch (error) {
+      console.error("导入内置角色预设失败", error);
+    }
     auditRepository = new SqliteAuditRepository(databaseHandle.database);
     const memoryRepository = new SqliteMemoryRepository(databaseHandle.database);
     const embeddingProvider = new SiliconFlowEmbeddingProvider(() =>
@@ -115,38 +154,66 @@ app.whenReady().then(async () => {
       apiKey: () => credentialStore.getDeepSeekKey(),
       model: "deepseek-flash",
     });
-    assistantCore = new AssistantCore(
-      conversations,
-      memoryService,
-      memoryService,
-      provider,
-      () => settingsStore.get().persona,
-    );
     taskEngine = new TaskEngine(
       new SqliteTaskRepository(databaseHandle.database),
       {
-        notify: async ({ title, body }) => {
+        notify: async ({
+          title,
+          body,
+          category,
+        }): Promise<NotificationDeliveryResult> => {
+          const now = new Date();
+          const start = new Date(now);
+          start.setHours(0, 0, 0, 0);
+          const end = new Date(start);
+          end.setDate(end.getDate() + 1);
+          const sent = databaseHandle?.database
+            .prepare(
+              `SELECT COUNT(*) AS count FROM notifications
+               WHERE status = 'sent' AND created_at >= ? AND created_at < ?`,
+            )
+            .get(start.toISOString(), end.toISOString()) as
+            | { count: number }
+            | undefined;
+          const decision = decideNotification(
+            settingsStore.get().proactive,
+            category,
+            sent?.count ?? 0,
+            now,
+          );
+          if (!decision.allowed) {
+            return { status: "suppressed", reason: decision.reason };
+          }
           if (!ElectronNotification.isSupported()) {
             throw new Error("SYSTEM_NOTIFICATION_UNAVAILABLE");
           }
           new ElectronNotification({ title, body }).show();
+          return { status: "sent" };
         },
       },
     );
     taskEngine.recover();
+    const connectors = new SqliteConnectorRepository(
+      databaseHandle.database,
+    );
+    connectorRepository = connectors;
+    calendarService = new LocalCalendarService(
+      new SqliteCalendarRepository(databaseHandle.database),
+      connectors,
+    );
     dailyBriefService = new DailyBriefService(
       memoryService,
       () => taskEngine?.listTasks(200) ?? [],
       new SqliteDailyBriefRepository(databaseHandle.database),
       provider,
+      (date, timezone) => calendarService?.listForDate(date, timezone) ?? {
+        connected: false,
+        events: [],
+      },
     );
     taskEngine.registerExecutor("daily_brief", async () => {
       await dailyBriefService?.generate();
     });
-    const connectors = new SqliteConnectorRepository(
-      databaseHandle.database,
-    );
-    connectorRepository = connectors;
     toolRuntime = new ToolRuntime(
       new SqliteToolCallRepository(databaseHandle.database),
       new StaticPermissionPolicy(
@@ -166,9 +233,47 @@ app.whenReady().then(async () => {
       riskLevel: "low",
       requiredScopes: ["system.read"],
       timeoutMs: 2_000,
+      modelCallable: true,
       execute: async () => ({
         outputSummary: new Date().toLocaleString("zh-CN"),
       }),
+    });
+    toolRuntime.register({
+      name: "calendar.events.list",
+      description: "读取指定日期 00:00-24:00 的本地导入日历日程；只读。",
+      inputSchema: z
+        .object({
+          date: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .optional(),
+        })
+        .strict(),
+      riskLevel: "medium",
+      requiredScopes: ["connector.read"],
+      timeoutMs: 5_000,
+      modelCallable: true,
+      execute: async (input) => {
+        const date =
+          (input as { date?: string }).date ??
+          new Intl.DateTimeFormat("en-CA", {
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(new Date());
+        const result = calendarService?.listForDate(
+          date,
+          Intl.DateTimeFormat().resolvedOptions().timeZone,
+        );
+        if (!result?.connected) {
+          throw new Error("CALENDAR_NOT_CONNECTED");
+        }
+        return {
+          outputSummary: `${date} 共 ${result.events.length} 项日程`,
+          output: result.events,
+        };
+      },
     });
     toolRuntime.register({
       name: "connector.email.status",
@@ -177,6 +282,7 @@ app.whenReady().then(async () => {
       riskLevel: "low",
       requiredScopes: ["connector.read"],
       timeoutMs: 2_000,
+      modelCallable: true,
       execute: async () => {
         const email = connectors
           .list()
@@ -203,6 +309,7 @@ app.whenReady().then(async () => {
       riskLevel: "medium",
       requiredScopes: ["email.read"],
       timeoutMs: 35_000,
+      modelCallable: true,
       execute: async (input, context) => {
         try {
           const envelopes = await emailConnector.listRecent(
@@ -238,6 +345,7 @@ app.whenReady().then(async () => {
       riskLevel: "medium",
       requiredScopes: ["email.read"],
       timeoutMs: 35_000,
+      modelCallable: true,
       execute: async (input, context) => {
         const message = await emailConnector.readMessage(
           (input as { id: string }).id,
@@ -311,6 +419,14 @@ app.whenReady().then(async () => {
         };
       },
     });
+    assistantCore = new AssistantCore(
+      conversations,
+      memoryService,
+      memoryService,
+      provider,
+      () => settingsStore.get().persona,
+      toolRuntime,
+    );
     taskEngine.ensureDailyBrief(
       loaded.settings.dailyBrief.enabled,
       loaded.settings.dailyBrief.time,
@@ -327,12 +443,13 @@ app.whenReady().then(async () => {
     dailyBriefService = null;
     toolRuntime = null;
     connectorRepository = null;
+    calendarService = null;
     characterAssets = null;
     characterPoseDirector = null;
     auditRepository = null;
   }
 
-  createMainWindow(loaded.settings);
+  createMainWindow(settingsStore.get());
   createTray();
   registerIpcHandlers();
   applyDesktopSettings();
@@ -628,6 +745,11 @@ function registerIpcHandlers(): void {
     assertTrustedSender(event.sender.id);
     const siliconFlowConfigured =
       await credentialStore.isProviderConfigured("siliconflow");
+    const calendarStatus = calendarService?.status() ?? {
+      connected: false,
+      eventCount: 0,
+      lastSyncAt: null,
+    };
     return {
       settings: settingsStore.get(),
       meta: {
@@ -640,6 +762,8 @@ function registerIpcHandlers(): void {
         embeddingModel: "BAAI/bge-m3",
         imageGenerationConfigured: siliconFlowConfigured,
         imageGenerationModel: CHARACTER_IMAGE_EDIT_MODEL,
+        calendarConnected: calendarStatus.connected,
+        calendarEventCount: calendarStatus.eventCount,
         conversationId: conversations?.getMostRecentConversation()?.id ?? null,
         database: {
           ready: databaseHandle !== null,
@@ -1063,6 +1187,113 @@ function registerIpcHandlers(): void {
     },
   );
 
+  ipcMain.handle(IPC_CHANNELS.createBackup, async (event) => {
+    assertTrustedSender(event.sender.id);
+    if (!databaseHandle || !mainWindow) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    const selected = await dialog.showOpenDialog(mainWindow, {
+      title: "选择完整备份保存位置",
+      buttonLabel: "在此创建备份",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    const parentDirectory = selected.filePaths[0];
+    if (selected.canceled || !parentDirectory) {
+      return { cancelled: true };
+    }
+    const result = await new BackupService().create({
+      database: databaseHandle.database,
+      userDataPath: app.getPath("userData"),
+      parentDirectory,
+      appVersion: app.getVersion(),
+      schemaVersion: databaseHandle.schemaVersion,
+    });
+    return {
+      cancelled: false,
+      directory: result.directory,
+      fileCount: result.fileCount,
+    };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.restoreBackup, async (event) => {
+    assertTrustedSender(event.sender.id);
+    if (!databaseHandle || !mainWindow) {
+      throw new Error("DATABASE_UNAVAILABLE");
+    }
+    const selected = await dialog.showOpenDialog(mainWindow, {
+      title: "选择 AIDesktopPet 完整备份目录",
+      buttonLabel: "选择备份",
+      properties: ["openDirectory"],
+    });
+    const directory = selected.filePaths[0];
+    if (selected.canceled || !directory) {
+      return { cancelled: true };
+    }
+    const backupService = new BackupService();
+    await backupService.validate(directory);
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      title: "恢复完整备份",
+      message: "将覆盖当前数据库、设置和角色资产，并重启应用。",
+      detail:
+        "恢复前会自动保留当前数据副本。API Key 和 QQ 授权码不包含在备份中；换机恢复后需要重新配置。",
+      buttons: ["取消", "恢复并重启"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (confirmation.response !== 1) {
+      return { cancelled: true };
+    }
+
+    taskEngine?.stop();
+    for (const controller of activeChatRequests.values()) {
+      controller.abort();
+    }
+    for (const controller of activePoseRequests.values()) {
+      controller.abort();
+    }
+    activeChatRequests.clear();
+    activePoseRequests.clear();
+    databaseHandle.database.close();
+    databaseHandle = null;
+    try {
+      await backupService.restore({
+        directory,
+        userDataPath: app.getPath("userData"),
+      });
+    } catch (error) {
+      console.error("恢复备份失败", error);
+      quitting = true;
+      app.relaunch();
+      app.exit(1);
+      throw error;
+    }
+    quitting = true;
+    setTimeout(() => {
+      app.relaunch();
+      app.exit(0);
+    }, 100);
+    return { cancelled: false, restarting: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.importCalendarIcs, (event, input: unknown) => {
+    assertTrustedSender(event.sender.id);
+    if (!calendarService) {
+      throw new Error("CALENDAR_SERVICE_UNAVAILABLE");
+    }
+    const parsed = calendarImportSchema.parse(input);
+    const result = calendarService.import({
+      fileName: parsed.fileName,
+      bytes: parsed.bytes,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    return {
+      ...result,
+      eventCount: calendarService.status().eventCount,
+    };
+  });
+
   ipcMain.handle(IPC_CHANNELS.quit, async (event) => {
     assertTrustedSender(event.sender.id);
     await quitApplication();
@@ -1143,6 +1374,13 @@ const characterPoseGenerationSchema = z
     sourceAssetId: z.string().uuid(),
     instruction: z.string().trim().min(2).max(500),
     compositionMode: z.enum(["character", "scene"]),
+  })
+  .strict();
+
+const calendarImportSchema = z
+  .object({
+    fileName: z.string().trim().min(1).max(255),
+    bytes: z.instanceof(Uint8Array),
   })
   .strict();
 

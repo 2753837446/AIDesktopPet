@@ -6,6 +6,9 @@ import type {
   MessageRecord,
   MessageRole,
   ModelRequest,
+  ModelStreamEvent,
+  ModelToolRequest,
+  ModelToolDefinition,
   ToolCallRecord,
 } from "./domain";
 
@@ -43,6 +46,17 @@ export interface MemoryCapturePort {
 export interface ModelProvider {
   readonly modelName: string;
   chat(request: ModelRequest): AsyncIterable<string>;
+  chatWithTools?(request: ModelToolRequest): AsyncIterable<ModelStreamEvent>;
+}
+
+export interface AssistantToolPort {
+  listModelTools(): ModelToolDefinition[];
+  invoke(input: {
+    requestId: string;
+    toolName: string;
+    input: unknown;
+    signal?: AbortSignal;
+  }): Promise<ToolCallRecord>;
 }
 
 export interface EmbeddingProvider {

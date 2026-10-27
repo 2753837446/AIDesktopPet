@@ -1,4 +1,5 @@
 import type {
+  CalendarEventRecord,
   DailyBriefRecord,
   MemorySearchResult,
   TaskRecord,
@@ -13,6 +14,13 @@ export class DailyBriefService {
     private readonly listTasks: () => TaskRecord[],
     private readonly repository: SqliteDailyBriefRepository,
     private readonly model: ModelProvider,
+    private readonly listCalendarEvents: (
+      date: string,
+      timezone: string,
+    ) => { connected: boolean; events: CalendarEventRecord[] } = () => ({
+      connected: false,
+      events: [],
+    }),
   ) {}
 
   latest(): DailyBriefRecord | null {
@@ -36,20 +44,26 @@ export class DailyBriefService {
           memory.privacyLevel !== "local_only" &&
           dateInTimezone(new Date(memory.updatedAt), timezone) === briefDate,
       );
+    const calendar = this.listCalendarEvents(briefDate, timezone);
 
     const sourceStatus: DailyBriefRecord["sourceStatus"] = {
       tasks: "available",
       memories: "available",
       email: "not_connected",
-      calendar: "not_connected",
+      calendar: calendar.connected ? "available" : "not_connected",
     };
 
-    if (tasks.length === 0 && memories.length === 0) {
+    if (
+      tasks.length === 0 &&
+      memories.length === 0 &&
+      calendar.events.length === 0
+    ) {
       return this.repository.save({
         briefDate,
         timezone,
-        content:
-          "今天目前没有已到期的任务，也没有新的长期记忆。邮件和日历尚未连接。",
+        content: calendar.connected
+          ? "今天目前没有已到期的任务、新的长期记忆或日程。邮件尚未连接。"
+          : "今天目前没有已到期的任务，也没有新的长期记忆。邮件和日历尚未连接。",
         sourceStatus,
         model: "local-deterministic",
       });
@@ -59,6 +73,7 @@ export class DailyBriefService {
       `日期：${briefDate}`,
       `任务：\n${formatTasks(tasks)}`,
       `长期记忆：\n${formatMemories(memories)}`,
+      `今日日程：\n${formatCalendarEvents(calendar.events, timezone)}`,
       "请用中文生成简洁的今日总结，包含：今日重点、待办与风险、简短的下一步建议。",
       "只能使用上面给出的数据；不要编造邮件、日历或已完成动作。",
     ].join("\n\n");
@@ -87,6 +102,32 @@ export class DailyBriefService {
       model: this.model.modelName,
     });
   }
+}
+
+function formatCalendarEvents(
+  events: CalendarEventRecord[],
+  timezone: string,
+): string {
+  if (events.length === 0) {
+    return "无";
+  }
+  return events
+    .map((event) => {
+      const start = new Intl.DateTimeFormat("zh-CN", {
+        timeZone: timezone,
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(event.startsAt));
+      const end = new Intl.DateTimeFormat("zh-CN", {
+        timeZone: timezone,
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(event.endsAt));
+      return `- ${start}-${end} ${event.title}${
+        event.location ? ` @ ${event.location}` : ""
+      }`;
+    })
+    .join("\n");
 }
 
 function formatTasks(tasks: TaskRecord[]): string {

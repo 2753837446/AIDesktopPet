@@ -51,6 +51,7 @@ export class CharacterAssetService {
     return this.persist({
       ...input,
       category: input.category,
+      presetKey: null,
       origin: "upload",
       sourceAssetId: null,
       generationPrompt: null,
@@ -79,6 +80,7 @@ export class CharacterAssetService {
       bytes: input.bytes,
       view: "idle",
       category: input.compositionMode === "scene" ? "scene" : "character",
+      presetKey: null,
       displayName: `${source.displayName} · ${
         input.compositionMode === "scene" ? "AI 场景" : "AI 姿态"
       }`,
@@ -96,6 +98,7 @@ export class CharacterAssetService {
     view: CharacterView;
     displayName?: string;
     category: CharacterAssetCategory;
+    presetKey: string | null;
     origin: CharacterAssetOrigin;
     sourceAssetId: string | null;
     generationPrompt: string | null;
@@ -141,6 +144,7 @@ export class CharacterAssetService {
       height: detected.height,
       sizeBytes: input.bytes.byteLength,
       category: input.category,
+      presetKey: input.presetKey,
       origin: input.origin,
       sourceAssetId: input.sourceAssetId,
       generationPrompt: input.generationPrompt,
@@ -156,6 +160,45 @@ export class CharacterAssetService {
       throw error;
     }
     return asset;
+  }
+
+  async importPreset(input: {
+    presetKey: string;
+    fileName: string;
+    bytes: Uint8Array;
+    view: CharacterView;
+    displayName: string;
+  }): Promise<{ asset: CharacterAsset; imported: boolean }> {
+    if (!/^[a-z0-9-]{1,80}$/.test(input.presetKey)) {
+      throw new Error("INVALID_CHARACTER_PRESET_KEY");
+    }
+    const existing = this.repository.getByPresetKey(input.presetKey);
+    if (existing) {
+      return { asset: toPublicAsset(existing), imported: false };
+    }
+
+    try {
+      const asset = await this.persist({
+        fileName: input.fileName,
+        bytes: input.bytes,
+        view: input.view,
+        displayName: input.displayName,
+        category: "character",
+        presetKey: input.presetKey,
+        origin: "upload",
+        sourceAssetId: null,
+        generationPrompt: null,
+        generationModel: null,
+        generatedAt: null,
+      });
+      return { asset, imported: true };
+    } catch (error) {
+      const raced = this.repository.getByPresetKey(input.presetKey);
+      if (raced) {
+        return { asset: toPublicAsset(raced), imported: false };
+      }
+      throw error;
+    }
   }
 
   async read(id: string): Promise<{ asset: CharacterAsset; bytes: Uint8Array }> {
@@ -174,7 +217,10 @@ export class CharacterAssetService {
 
   async delete(id: string): Promise<boolean> {
     const asset = this.repository.get(id);
-    if (!asset || !this.repository.delete(id)) {
+    if (!asset || asset.presetKey) {
+      return false;
+    }
+    if (!this.repository.delete(id)) {
       return false;
     }
     if (this.isInsideAssetsDirectory(asset.filePath)) {
@@ -199,6 +245,7 @@ function toPublicAsset(asset: StoredCharacterAsset): CharacterAsset {
     height: asset.height,
     sizeBytes: asset.sizeBytes,
     category: asset.category,
+    presetKey: asset.presetKey,
     origin: asset.origin,
     sourceAssetId: asset.sourceAssetId,
     generationPrompt: asset.generationPrompt,

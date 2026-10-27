@@ -19,6 +19,7 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
     const window = await electronApp.firstWindow();
     await expect(window.getByTestId("pet-window")).toBeVisible();
     await expect(window.getByAltText("桌宠背景")).toHaveCount(0);
+    await expect(window.getByAltText("自定义桌宠形象")).toBeVisible();
     await expect(window.getByText("基础桌宠可用")).toBeVisible();
     await expect(window.getByText("AI 对话尚未配置")).toBeVisible();
 
@@ -75,6 +76,18 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
     await window.getByRole("button", { name: /配置 AI|设置/ }).click();
     await expect(window.getByRole("heading", { name: "桌宠设置" })).toBeVisible();
     await expect(window.getByText("模型尚未配置")).toBeVisible();
+    await expect(
+      window.getByRole("button", { name: /苏清月 · 动漫桌宠/ }),
+    ).toBeVisible();
+    await expect(window.getByText("内置角色").first()).toBeVisible();
+    await expect(window.getByText("通知类别")).toBeVisible();
+    await expect(window.getByText("每日通知上限")).toBeVisible();
+    await expect(
+      window.getByRole("button", { name: "创建完整备份" }),
+    ).toBeVisible();
+    await expect(
+      window.getByRole("button", { name: "从备份恢复" }),
+    ).toBeVisible();
 
     const expandedWidth = await electronApp.evaluate(({ BrowserWindow }) => {
       return BrowserWindow.getAllWindows()[0]?.getBounds().width ?? 0;
@@ -95,6 +108,36 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
       .fill("sk-testabcdefghijklmnopqrstuvwxyz123456");
     await window.getByRole("button", { name: "保存并启用" }).click();
     await expect(window.getByText("DeepSeek Flash 已连接").first()).toBeVisible();
+    const icsStart = formatIcsUtc(new Date());
+    const icsEnd = formatIcsUtc(new Date(Date.now() + 3_600_000));
+    await window
+      .locator('input[accept*=".ics"]')
+      .setInputFiles({
+        name: "work.ics",
+        mimeType: "text/calendar",
+        buffer: Buffer.from(
+          [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "BEGIN:VEVENT",
+            "UID:e2e-calendar-1",
+            "SUMMARY:E2E 产品评审",
+            `DTSTART:${icsStart}`,
+            `DTEND:${icsEnd}`,
+            "END:VEVENT",
+            "END:VCALENDAR",
+          ].join("\r\n"),
+        ),
+      });
+    await expect(window.getByText(/已导入 1 项日程/)).toBeVisible();
+    const calendarMeta = await window.evaluate(async () => {
+      const api = (
+        globalThis as typeof globalThis & { desktop?: DesktopApi }
+      ).desktop;
+      return (await api?.getBootstrap())?.meta;
+    });
+    expect(calendarMeta?.calendarConnected).toBe(true);
+    expect(calendarMeta?.calendarEventCount).toBe(1);
     await window
       .locator('input[accept*="image/png"]')
       .setInputFiles({
@@ -265,3 +308,10 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
     await rm(userDataDirectory, { recursive: true, force: true });
   }
 });
+
+function formatIcsUtc(date: Date): string {
+  return date
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+}

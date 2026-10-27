@@ -21,7 +21,7 @@ test("真实 DeepSeek Flash 流式对话与长期记忆", async ({}, testInfo) =
       window.getByText("DeepSeek Flash 已连接", { exact: true }),
     ).toBeVisible();
     await window.getByRole("button", { name: "开始聊天" }).click();
-    await expect(window.getByRole("heading", { name: "阿湛 在听" })).toBeVisible();
+    await expect(window.getByRole("heading", { name: /在听/ })).toBeVisible();
 
     await window
       .getByPlaceholder(/说点什么/)
@@ -31,6 +31,27 @@ test("真实 DeepSeek Flash 流式对话与长期记忆", async ({}, testInfo) =
     const assistantMessage = window.locator(".chat-message.assistant").last();
     await expect(assistantMessage).toContainText("连接成功", { timeout: 60_000 });
     await expect(window.getByRole("button", { name: "发送" })).toBeVisible();
+
+    await window
+      .getByPlaceholder(/说点什么/)
+      .fill("必须先调用 clock.read 工具读取本地时间，再用一句话告诉我现在几点。");
+    await window.getByRole("button", { name: "发送" }).click();
+    await expect
+      .poll(
+        async () => window.locator(".tool-toast").last().textContent(),
+        { timeout: 60_000 },
+      )
+      .toContain("clock.read");
+    await expect(window.getByRole("button", { name: "发送" })).toBeVisible();
+    const toolAudit = await window.evaluate(async () => {
+      const api = (
+        globalThis as typeof globalThis & { desktop?: DesktopApi }
+      ).desktop;
+      return api?.listAuditLogs("tool.completed", 20);
+    });
+    expect(
+      toolAudit?.some((record) => record.action === "tool.completed"),
+    ).toBe(true);
 
     const assistantCount = await window.locator(".chat-message.assistant").count();
     await window

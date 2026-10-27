@@ -26,6 +26,7 @@ test("打包目录中的 Windows 应用可以启动", async () => {
   try {
     const window = await electronApp.firstWindow();
     await expect(window.getByTestId("pet-window")).toBeVisible();
+    await expect(window.getByAltText("自定义桌宠形象")).toBeVisible();
     await expect(window.getByText("基础桌宠可用")).toBeVisible();
   } finally {
     await electronApp.close();

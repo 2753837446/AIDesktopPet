@@ -18,6 +18,14 @@ export interface QuietHoursSettings {
 export interface ProactiveSettings {
   enabled: boolean;
   quietHours: QuietHoursSettings;
+  categories: {
+    task: boolean;
+    email: boolean;
+    calendar: boolean;
+    dailyBrief: boolean;
+    system: boolean;
+  };
+  dailyLimit: number;
 }
 
 export interface StartupSettings {
@@ -69,6 +77,8 @@ export interface DesktopSettingsPatch {
   proactive?: {
     enabled?: boolean;
     quietHours?: Partial<QuietHoursSettings>;
+    categories?: Partial<ProactiveSettings["categories"]>;
+    dailyLimit?: number;
   };
   startup?: Partial<StartupSettings>;
   dailyBrief?: Partial<DailyBriefSettings>;
@@ -100,6 +110,14 @@ export const DEFAULT_SETTINGS: DesktopSettings = {
       start: "23:00",
       end: "07:00",
     },
+    categories: {
+      task: true,
+      email: true,
+      calendar: true,
+      dailyBrief: true,
+      system: true,
+    },
+    dailyLimit: 20,
   },
   startup: {
     launchAtLogin: false,

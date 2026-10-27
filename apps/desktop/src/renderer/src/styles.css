@@ -645,6 +645,57 @@ input {
   border-top: 1px solid #edf2f5;
 }
 
+.notification-categories {
+  margin-top: 8px;
+  padding-top: 9px;
+  border-top: 1px solid #edf2f5;
+}
+
+.notification-categories h3 {
+  margin: 0 0 4px;
+  color: #527087;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.notification-categories .setting-toggle {
+  min-height: 49px;
+}
+
+.daily-limit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 62px;
+  border-top: 1px solid #edf2f5;
+}
+
+.daily-limit-row > span {
+  display: grid;
+  gap: 3px;
+}
+
+.daily-limit-row strong {
+  color: #203f58;
+  font-size: 12px;
+}
+
+.daily-limit-row small {
+  color: #7b8e9e;
+  font-size: 10px;
+}
+
+.daily-limit-row input {
+  width: 70px;
+  padding: 7px 8px;
+  border: 1px solid #dbe6ed;
+  border-radius: 8px;
+  background: #fff;
+  color: #31526b;
+  font-size: 11px;
+}
+
 .setting-toggle > span:first-child {
   display: grid;
   gap: 3px;
@@ -818,6 +869,11 @@ input {
 .character-origin-badge.scene {
   background: #fff1dd;
   color: #9a6418;
+}
+
+.character-origin-badge.preset {
+  background: #f0edff;
+  color: #6b53a5;
 }
 
 .builtin-character-preview {
@@ -1395,6 +1451,16 @@ input {
   font-size: 9px;
 }
 
+.tool-toast {
+  align-self: flex-start;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: #376a9c;
+  font-size: 9px;
+}
+
 .chat-composer {
   display: grid;
   gap: 9px;
@@ -1449,6 +1515,38 @@ input {
 
 .secondary-panel-button:hover {
   background: #edf6fb;
+}
+
+.danger-panel-button {
+  padding: 8px 11px;
+  border: 1px solid #efc9ce;
+  border-radius: 9px;
+  background: #fff8f8;
+  color: #a63c4c;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.danger-panel-button:hover {
+  background: #fff1f2;
+}
+
+.backup-card {
+  display: grid;
+  gap: 9px;
+}
+
+.backup-description {
+  margin: 0;
+  color: #6e8493;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.backup-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .center-header {

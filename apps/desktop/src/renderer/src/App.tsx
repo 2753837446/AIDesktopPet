@@ -294,6 +294,10 @@ function mergeLocalSettings(
         ...current.proactive.quietHours,
         ...patch.proactive?.quietHours,
       },
+      categories: {
+        ...current.proactive.categories,
+        ...patch.proactive?.categories,
+      },
     },
     startup: {
       ...current.startup,
@@ -398,6 +402,7 @@ function ChatPanel({
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [memoryNotice, setMemoryNotice] = useState("");
+  const [toolNotice, setToolNotice] = useState("");
   const [chatError, setChatError] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(Boolean(conversationId));
   const [poseProposal, setPoseProposal] = useState<{
@@ -476,6 +481,7 @@ function ChatPanel({
         setStreamingMessageId,
         setActiveRequestId,
         setMemoryNotice,
+        setToolNotice,
         setChatError,
       });
       if (
@@ -573,6 +579,7 @@ function ChatPanel({
     setActiveRequestId(requestId);
     setChatError("");
     setMemoryNotice("");
+    setToolNotice("");
     setDraft("");
     setMessages((current) => [
       ...current,
@@ -752,6 +759,11 @@ function ChatPanel({
                 {poseError}
               </p>
             ) : null}
+            {toolNotice ? (
+              <p className="tool-toast" role="status">
+                {toolNotice}
+              </p>
+            ) : null}
             {memoryNotice ? <p className="memory-toast">{memoryNotice}</p> : null}
             {chatError ? (
               <p className="inline-error" role="alert">
@@ -805,6 +817,7 @@ interface ChatEventSetters {
   setStreamingMessageId: React.Dispatch<React.SetStateAction<string | null>>;
   setActiveRequestId: React.Dispatch<React.SetStateAction<string | null>>;
   setMemoryNotice: React.Dispatch<React.SetStateAction<string>>;
+  setToolNotice: React.Dispatch<React.SetStateAction<string>>;
   setChatError: React.Dispatch<React.SetStateAction<string>>;
 }
 
@@ -835,6 +848,18 @@ function applyChatEvent(
           ? { ...message, content: message.content + event.delta }
           : message,
       ),
+    );
+    return;
+  }
+
+  if (event.type === "tool.started") {
+    setters.setToolNotice(`正在调用 ${event.toolName}…`);
+    return;
+  }
+
+  if (event.type === "tool.completed") {
+    setters.setToolNotice(
+      `${event.toolName} · ${event.summary}`,
     );
     return;
   }
@@ -2003,7 +2028,16 @@ function SettingsPanel({
   const [poseMessage, setPoseMessage] = useState("");
   const [poseCompositionMode, setPoseCompositionMode] =
     useState<CharacterCompositionMode>("character");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState("");
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [calendarMessage, setCalendarMessage] = useState("");
+  const [calendarStatus, setCalendarStatus] = useState({
+    connected: meta.calendarConnected,
+    eventCount: meta.calendarEventCount,
+  });
   const characterFileInput = useRef<HTMLInputElement | null>(null);
+  const calendarFileInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!window.desktop) {
@@ -2358,6 +2392,82 @@ function SettingsPanel({
     }
   };
 
+  const createBackup = async (): Promise<void> => {
+    if (!window.desktop) {
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage("");
+    try {
+      const result = await window.desktop.createBackup();
+      if (!result.cancelled) {
+        setBackupMessage(
+          `完整备份已创建：${result.directory}（${result.fileCount ?? 0} 个文件）。`,
+        );
+      }
+    } catch (error) {
+      console.error("创建备份失败", error);
+      setBackupMessage("备份失败，请检查目标目录和磁盘空间。");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const restoreBackup = async (): Promise<void> => {
+    if (!window.desktop) {
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage("");
+    try {
+      const result = await window.desktop.restoreBackup();
+      if (result.restarting) {
+        setBackupMessage("备份已恢复，应用正在重启…");
+      }
+    } catch (error) {
+      console.error("恢复备份失败", error);
+      setBackupMessage("恢复失败，应用将尝试重新启动并保留原数据。");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const importCalendar = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ): Promise<void> => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !window.desktop) {
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setCalendarMessage("导入失败：ICS 文件不能超过 5 MB。");
+      return;
+    }
+    setCalendarBusy(true);
+    setCalendarMessage("");
+    try {
+      const result = await window.desktop.importCalendarIcs({
+        fileName: file.name,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      });
+      setCalendarStatus({
+        connected: true,
+        eventCount: result.eventCount,
+      });
+      setCalendarMessage(
+        `已导入 ${result.imported} 项日程${
+          result.skipped > 0 ? `，跳过 ${result.skipped} 项` : ""
+        }。`,
+      );
+    } catch (error) {
+      console.error("导入日历年失败", error);
+      setCalendarMessage("日历导入失败，请检查 ICS 格式和文件大小。");
+    } finally {
+      setCalendarBusy(false);
+    }
+  };
+
   return (
     <section className="settings-panel no-drag" role="dialog" aria-modal="true">
       <header className="settings-header">
@@ -2473,6 +2583,84 @@ function SettingsPanel({
           </div>
         )}
         {embeddingMessage ? <p className="provider-message">{embeddingMessage}</p> : null}
+      </div>
+
+      <div className="provider-card backup-card">
+        <div className="provider-heading">
+          <div>
+            <span className="eyebrow">LOCAL DATA</span>
+            <h2>完整备份与恢复</h2>
+          </div>
+          <span className="provider-status connected">不含密钥</span>
+        </div>
+        <p className="backup-description">
+          备份数据库、记忆、任务、角色资产和非敏感设置。API Key 与 QQ
+          授权码不会写入备份。
+        </p>
+        <div className="backup-actions">
+          <button
+            className="secondary-panel-button"
+            type="button"
+            disabled={backupBusy}
+            onClick={() => void createBackup()}
+          >
+            {backupBusy ? "处理中…" : "创建完整备份"}
+          </button>
+          <button
+            className="danger-panel-button"
+            type="button"
+            disabled={backupBusy}
+            onClick={() => void restoreBackup()}
+          >
+            从备份恢复
+          </button>
+        </div>
+        {backupMessage ? (
+          <p className="provider-message">{backupMessage}</p>
+        ) : null}
+      </div>
+
+      <div className="provider-card backup-card">
+        <div className="provider-heading">
+          <div>
+            <span className="eyebrow">CALENDAR</span>
+            <h2>本地日历 ICS</h2>
+          </div>
+          <span
+            className={
+              calendarStatus.connected
+                ? "provider-status connected"
+                : "provider-status"
+            }
+          >
+            {calendarStatus.connected
+              ? `${calendarStatus.eventCount} 项`
+              : "未导入"}
+          </span>
+        </div>
+        <p className="backup-description">
+          从系统日历导出 `.ics` 后在这里导入。文件只在本机解析，日程会进入每日总结和模型只读查询。
+        </p>
+        <div className="backup-actions">
+          <button
+            className="secondary-panel-button"
+            type="button"
+            disabled={calendarBusy}
+            onClick={() => calendarFileInput.current?.click()}
+          >
+            {calendarBusy ? "导入中…" : "选择 ICS 文件"}
+          </button>
+          <input
+            ref={calendarFileInput}
+            type="file"
+            accept=".ics,text/calendar,text/plain"
+            hidden
+            onChange={(event) => void importCalendar(event)}
+          />
+        </div>
+        {calendarMessage ? (
+          <p className="provider-message">{calendarMessage}</p>
+        ) : null}
       </div>
 
       <div className="settings-grid">
@@ -2611,7 +2799,11 @@ function SettingsPanel({
                     <small>
                       {characterViewLabel(asset.view)} · {asset.width}×{asset.height}
                     </small>
-                    {asset.category === "scene" ? (
+                    {asset.presetKey ? (
+                      <span className="character-origin-badge preset">
+                        内置角色
+                      </span>
+                    ) : asset.category === "scene" ? (
                       <span className="character-origin-badge scene">
                         完整场景
                       </span>
@@ -2619,14 +2811,16 @@ function SettingsPanel({
                       <span className="character-origin-badge">AI 姿态</span>
                     ) : null}
                   </button>
-                  <button
-                    className="character-delete"
-                    type="button"
-                    aria-label={`删除 ${asset.displayName}`}
-                    onClick={() => void deleteCharacter(asset)}
-                  >
-                    ×
-                  </button>
+                  {asset.presetKey ? null : (
+                    <button
+                      className="character-delete"
+                      type="button"
+                      aria-label={`删除 ${asset.displayName}`}
+                      onClick={() => void deleteCharacter(asset)}
+                    >
+                      ×
+                    </button>
+                  )}
                 </article>
               ))}
             </div>
@@ -2988,6 +3182,52 @@ function SettingsPanel({
               />
             </label>
           </div>
+          <div className="notification-categories">
+            <h3>通知类别</h3>
+            {(
+              [
+                ["task", "任务提醒"],
+                ["email", "邮件提醒"],
+                ["calendar", "日历提醒"],
+                ["dailyBrief", "每日总结"],
+                ["system", "系统状态"],
+              ] as const
+            ).map(([category, label]) => (
+              <SettingToggle
+                key={category}
+                label={label}
+                description="关闭后该类别只记录、不弹出系统通知。"
+                checked={settings.proactive.categories[category]}
+                disabled={!settings.proactive.enabled}
+                onChange={(checked) =>
+                  onUpdate({
+                    proactive: {
+                      categories: { [category]: checked },
+                    },
+                  })
+                }
+              />
+            ))}
+          </div>
+          <label className="daily-limit-row">
+            <span>
+              <strong>每日通知上限</strong>
+              <small>达到上限后当天剩余通知只记录、不弹出。</small>
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={settings.proactive.dailyLimit}
+              disabled={!settings.proactive.enabled}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (Number.isInteger(value) && value >= 1 && value <= 100) {
+                  onUpdate({ proactive: { dailyLimit: value } });
+                }
+              }}
+            />
+          </label>
           <SettingToggle
             label="自动生成每日总结"
             description="到点后在本地汇总任务与非本地专属记忆。"

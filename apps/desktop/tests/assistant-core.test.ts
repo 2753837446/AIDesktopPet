@@ -3,9 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { AssistantCore } from "../src/core/assistant-core";
 import type {
   AssistantStreamEvent,
+  ModelStreamEvent,
   ModelRequest,
+  ModelToolRequest,
+  ToolCallRecord,
 } from "../src/core/domain";
-import type { ModelProvider } from "../src/core/ports";
+import type { AssistantToolPort, ModelProvider } from "../src/core/ports";
 import { MemoryService } from "../src/core/memory-service";
 import { openDatabase } from "../src/main/persistence/database";
 import { SqliteConversationRepository } from "../src/main/persistence/conversation-repository";
@@ -36,6 +39,7 @@ describe("AssistantCore", () => {
   let database: DatabaseSync;
   let assistant: AssistantCore;
   let conversations: SqliteConversationRepository;
+  let memories: MemoryService;
   let provider: FakeModelProvider;
   let persona = {
     ...DEFAULT_SETTINGS.persona,
@@ -47,7 +51,7 @@ describe("AssistantCore", () => {
     const opened = openDatabase(":memory:");
     database = opened.database;
     conversations = new SqliteConversationRepository(database);
-    const memories = new MemoryService(new SqliteMemoryRepository(database));
+    memories = new MemoryService(new SqliteMemoryRepository(database));
     provider = new FakeModelProvider();
     assistant = new AssistantCore(
       conversations,
@@ -107,7 +111,124 @@ describe("AssistantCore", () => {
       "安全规则、事实真实性、用户权限或工具确认要求冲突",
     );
   });
+
+  it("执行模型工具调用并把真实结果回传生成最终答复", async () => {
+    const provider = new FakeToolModelProvider();
+    const invocations: Array<{
+      requestId: string;
+      toolName: string;
+      input: unknown;
+    }> = [];
+    const tools: AssistantToolPort = {
+      listModelTools: () => [
+        {
+          name: "clock.read",
+          description: "读取本地时间",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      invoke: async (input) => {
+        invocations.push(input);
+        return completedToolCall(input.toolName);
+      },
+    };
+    const toolAssistant = new AssistantCore(
+      conversations,
+      memories,
+      memories,
+      provider,
+      () => persona,
+      tools,
+    );
+
+    const events = await collectEvents(
+      toolAssistant.sendMessage({
+        message: "现在几点？",
+        modelDestination: "cloud",
+      }),
+    );
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool.started",
+        toolName: "clock.read",
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool.completed",
+        status: "completed",
+        summary: "2026-10-28 01:30:00",
+      }),
+    );
+    const completed = events.find((event) => event.type === "message.completed");
+    expect(completed?.type).toBe("message.completed");
+    if (completed?.type !== "message.completed") {
+      throw new Error("缺少最终回答");
+    }
+    expect(completed.assistantMessage.content).toBe(
+      "现在是 2026-10-28 01:30:00。",
+    );
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0]?.input).toEqual({});
+    expect(provider.continuationRequests).toHaveLength(1);
+    expect(provider.continuationRequests[0]?.messages).toContainEqual(
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "call-clock",
+      }),
+    );
+  });
 });
+
+class FakeToolModelProvider implements ModelProvider {
+  readonly modelName = "fake-tool-model";
+  readonly continuationRequests: ModelRequest[] = [];
+
+  async *chat(request: ModelRequest): AsyncIterable<string> {
+    this.continuationRequests.push(request);
+    yield "现在是 2026-10-28 01:30:00。";
+  }
+
+  async *chatWithTools(
+    request: ModelToolRequest,
+  ): AsyncIterable<ModelStreamEvent> {
+    expect(request.tools.map((tool) => tool.name)).toEqual(["clock.read"]);
+    yield {
+      type: "tool_calls",
+      calls: [
+        {
+          id: "call-clock",
+          name: "clock.read",
+          arguments: "{}",
+        },
+      ],
+    };
+  }
+}
+
+function completedToolCall(toolName: string): ToolCallRecord {
+  const now = new Date().toISOString();
+  return {
+    id: "tool-call-1",
+    requestId: "request-1",
+    toolName,
+    inputSummary: "",
+    riskLevel: "low",
+    requiredScopes: ["system.read"],
+    status: "completed",
+    approvalStatus: "not_required",
+    approvalId: null,
+    outputSummary: "2026-10-28 01:30:00",
+    errorCode: null,
+    errorMessage: null,
+    traceId: "trace-1",
+    createdAt: now,
+    updatedAt: now,
+    startedAt: now,
+    finishedAt: now,
+  };
+}
 
 async function collectEvents(
   stream: AsyncIterable<AssistantStreamEvent>,

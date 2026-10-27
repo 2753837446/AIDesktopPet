@@ -221,26 +221,31 @@ export class SqliteTaskRepository {
 
   recordNotification(input: {
     task: TaskRecord;
+    category: "task" | "email" | "calendar" | "daily_brief" | "system";
     dedupeKey: string;
     title: string;
     body: string;
-    status: "pending" | "sent" | "failed";
+    status: "pending" | "sent" | "failed" | "dismissed";
+    userAction?: string | null;
     now: string;
   }): void {
     this.database
       .prepare(
         `INSERT OR IGNORE INTO notifications
-          (id, task_id, category, priority, dedupe_key, title, body, status, created_at)
-         VALUES (?, ?, 'task', ?, ?, ?, ?, ?, ?)`,
+          (id, task_id, category, priority, dedupe_key, title, body,
+           status, user_action, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         randomUUID(),
         input.task.id,
+        input.category,
         input.task.priority <= 2 ? "high" : "normal",
         input.dedupeKey,
         input.title,
         input.body,
         input.status,
+        input.userAction ?? null,
         input.now,
       );
   }

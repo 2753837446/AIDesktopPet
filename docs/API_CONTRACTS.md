@@ -2,7 +2,7 @@
 
 *Assistant Core、Memory Service、Task Engine、Tool Runtime 与 Connector 的接口草案*
 
-版本 V0.4 · 2026-10-27
+版本 V0.6 · 2026-10-28
 
 # 1. 设计原则
 
@@ -84,8 +84,7 @@ type AssistantEvent =
   | { type: "message.started"; messageId: UUID }
   | { type: "content.delta"; text: string }
   | { type: "tool.started"; toolCallId: UUID; toolName: string }
-  | { type: "tool.waiting_confirmation"; toolCallId: UUID; summary: string }
-  | { type: "tool.completed"; toolCallId: UUID; resultSummary: string }
+  | { type: "tool.completed"; toolCallId: UUID; toolName: string; status: string; summary: string }
   | { type: "message.completed"; messageId: UUID; usage?: TokenUsage }
   | { type: "message.cancelled"; messageId: UUID; reason: "user" | "timeout" | "shutdown" }
   | { type: "message.failed"; error: ErrorResult["error"] };
@@ -101,6 +100,13 @@ cancelAssistantRequest(requestId: UUID): Promise<Result<{ cancelled: boolean }>>
 ```
 
 规则：用户停止生成时通过 `requestId` 取消模型请求与尚未执行的低风险步骤；对已提交的外部动作应报告真实状态，不能假定取消成功。`modelDestination=cloud` 时，Context Builder 必须排除 `local_only` 数据；用户未显式改变单条数据处理策略时不得绕过该限制。
+
+模型工具调用：
+
+- DeepSeek 使用 `tools` / `tool_calls` 流式协议；函数名在发给供应商前转换为 `^[a-zA-Z0-9_-]+$`，返回后映射回内部工具名。
+- 单轮最多执行 3 个工具，工具结果最多 12,000 字符。
+- Tool Runtime 只向模型暴露显式 `modelCallable=true` 的低/中风险工具。
+- 发信、删除等高风险工具不得进入模型自动调用清单。
 
 # 4. Memory Service
 
@@ -365,6 +371,7 @@ interface CharacterAsset {
   height: number;
   sizeBytes: number;
   category: CharacterAssetCategory;
+  presetKey: string | null;
   origin: CharacterAssetOrigin;
   sourceAssetId: UUID | null;
   generationPrompt: string | null;
@@ -410,6 +417,44 @@ AI 姿态规则：
 - `prop` 为透明前景道具，设置最多保存 3 个唯一 ID。
 - `scene` 是完整合成图，可能包含不透明背景；选择 scene 时清空独立背景和道具选择。
 - 独立图层顺序固定为 `background -> prop -> character`。
+
+# 8.2 Local Data
+
+```text
+interface CalendarEventRecord {
+  id: UUID;
+  externalUid: string;
+  sourceName: string;
+  title: string;
+  description: string;
+  location: string;
+  startsAt: ISODateTime;
+  endsAt: ISODateTime;
+  timezone: string;
+  importedAt: ISODateTime;
+}
+
+importCalendarIcs(input: {
+  fileName: string;
+  bytes: Uint8Array; // max 5 MiB
+}): Promise<Result<{
+  imported: number;
+  skipped: number;
+  total: number;
+  eventCount: number;
+}>>;
+
+createBackup(): Promise<Result<{
+  directory: string;
+  fileCount: number;
+}>>;
+
+restoreBackup(): Promise<Result<{ restarting: boolean }>>;
+```
+
+- ICS 仅在本机解析，单文件最多 5 MiB、5,000 个事件；重复导入按来源替换。
+- 完整备份排除凭据、Cookie、缓存和日志；恢复前校验 manifest、文件大小、SHA-256 和 SQLite schema。
+- 恢复成功后重启应用；失败时恢复 pre-restore 数据副本。
 
 # 9. 错误码建议
 

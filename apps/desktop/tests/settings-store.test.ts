@@ -39,6 +39,8 @@ describe("SettingsStore", () => {
     expect(result.settings.persona.name).toBe("阿湛");
     expect(result.settings.appearance.customBackgroundId).toBeNull();
     expect(result.settings.appearance.customPropIds).toEqual([]);
+    expect(result.settings.proactive.categories.task).toBe(true);
+    expect(result.settings.proactive.dailyLimit).toBe(20);
 
     const persisted = JSON.parse(
       await readFile(path.join(directory, "settings.json"), "utf8"),

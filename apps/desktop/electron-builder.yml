@@ -6,10 +6,14 @@ directories:
 files:
   - out/**/*
   - package.json
+extraResources:
+  - from: resources/character-presets
+    to: character-presets
 asar: true
 win:
-  # 发布前必须改为签名和写入应用元数据；P1 只验证 unpacked 包可启动。
+  # 发布前仍需配置代码签名证书。
   signAndEditExecutable: false
+  icon: resources/icon.ico
   target:
     - target: nsis
       arch:

@@ -202,4 +202,36 @@ describe("ToolRuntime", () => {
       }),
     );
   });
+
+  it("模型工具清单只暴露显式允许的低中风险工具", () => {
+    runtime.register({
+      name: "test.model-read",
+      description: "可被模型调用的只读工具",
+      inputSchema: z.object({ query: z.string().max(20) }).strict(),
+      riskLevel: "low",
+      requiredScopes: ["test.read"],
+      timeoutMs: 1_000,
+      modelCallable: true,
+      execute: async () => ({ outputSummary: "ok" }),
+    });
+    runtime.register({
+      name: "test.model-write",
+      description: "高风险写工具",
+      inputSchema: z.object({}).strict(),
+      riskLevel: "high",
+      requiredScopes: ["test.write"],
+      timeoutMs: 1_000,
+      modelCallable: true,
+      execute: async () => ({ outputSummary: "not exposed" }),
+    });
+
+    const tools = runtime.listModelTools();
+    expect(tools.map((tool) => tool.name)).toEqual(["test.model-read"]);
+    expect(tools[0]?.parameters).toMatchObject({
+      type: "object",
+      properties: {
+        query: { type: "string", maxLength: 20 },
+      },
+    });
+  });
 });

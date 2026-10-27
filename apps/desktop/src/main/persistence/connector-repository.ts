@@ -41,19 +41,22 @@ export class SqliteConnectorRepository {
       status: ConnectorRecord["status"];
       accountLabel?: string;
       lastError?: string;
+      lastSyncAt?: string;
     },
   ): void {
     this.database
       .prepare(
         `UPDATE connectors
          SET status = ?, account_label = COALESCE(?, account_label),
-             last_error = ?, updated_at = ?
+             last_error = ?, last_sync_at = COALESCE(?, last_sync_at),
+             updated_at = ?
          WHERE id = ?`,
       )
       .run(
         input.status,
         input.accountLabel ?? null,
         input.lastError ?? null,
+        input.lastSyncAt ?? null,
         new Date().toISOString(),
         id,
       );

@@ -80,14 +80,42 @@ export interface MemoryCaptureInput {
 }
 
 export interface ModelMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  toolCallId?: string;
+  toolCalls?: ModelToolCall[];
+}
+
+export interface ModelToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+export interface ModelToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
 }
 
 export interface ModelRequest {
   messages: ModelMessage[];
   signal?: AbortSignal | undefined;
 }
+
+export interface ModelToolRequest extends ModelRequest {
+  tools: ModelToolDefinition[];
+}
+
+export type ModelStreamEvent =
+  | {
+      type: "content";
+      delta: string;
+    }
+  | {
+      type: "tool_calls";
+      calls: ModelToolCall[];
+    };
 
 export interface AssistantInput {
   conversationId?: string | undefined;
@@ -109,6 +137,20 @@ export type AssistantStreamEvent =
       type: "content.delta";
       assistantMessageId: string;
       delta: string;
+    }
+  | {
+      type: "tool.started";
+      assistantMessageId: string;
+      toolCallId: string;
+      toolName: string;
+    }
+  | {
+      type: "tool.completed";
+      assistantMessageId: string;
+      toolCallId: string;
+      toolName: string;
+      status: ToolCallStatus;
+      summary: string;
     }
   | {
       type: "message.completed";
@@ -223,6 +265,19 @@ export interface ConnectorRecord {
   updatedAt: string;
 }
 
+export interface CalendarEventRecord {
+  id: string;
+  externalUid: string;
+  sourceName: string;
+  title: string;
+  description: string;
+  location: string;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  importedAt: string;
+}
+
 export interface ToolSummary {
   name: string;
   description: string;
@@ -276,6 +331,7 @@ export interface CharacterAsset {
   height: number;
   sizeBytes: number;
   category: CharacterAssetCategory;
+  presetKey: string | null;
   origin: CharacterAssetOrigin;
   sourceAssetId: string | null;
   generationPrompt: string | null;

@@ -21,6 +21,7 @@ interface CharacterRow {
   size_bytes: number;
   file_path: string;
   category: CharacterAssetCategory;
+  preset_key: string | null;
   origin: CharacterAssetOrigin;
   source_asset_id: string | null;
   generation_prompt: string | null;
@@ -37,9 +38,9 @@ export class SqliteCharacterAssetRepository {
       .prepare(
         `INSERT INTO character_assets
           (id, display_name, view, mime_type, width, height, size_bytes,
-           file_path, category, origin, source_asset_id, generation_prompt,
-           generation_model, generated_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           file_path, category, preset_key, origin, source_asset_id,
+           generation_prompt, generation_model, generated_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         asset.id,
@@ -51,6 +52,7 @@ export class SqliteCharacterAssetRepository {
         asset.sizeBytes,
         asset.filePath,
         asset.category,
+        asset.presetKey,
         asset.origin,
         asset.sourceAssetId,
         asset.generationPrompt,
@@ -78,6 +80,16 @@ export class SqliteCharacterAssetRepository {
     return { ...mapAsset(row), filePath: row.file_path };
   }
 
+  getByPresetKey(presetKey: string): StoredCharacterAsset | null {
+    const row = this.database
+      .prepare("SELECT * FROM character_assets WHERE preset_key = ?")
+      .get(presetKey) as CharacterRow | undefined;
+    if (!row) {
+      return null;
+    }
+    return { ...mapAsset(row), filePath: row.file_path };
+  }
+
   delete(id: string): boolean {
     const result = this.database
       .prepare("DELETE FROM character_assets WHERE id = ?")
@@ -96,6 +108,7 @@ function mapAsset(row: CharacterRow): CharacterAsset {
     height: row.height,
     sizeBytes: row.size_bytes,
     category: row.category,
+    presetKey: row.preset_key,
     origin: row.origin,
     sourceAssetId: row.source_asset_id,
     generationPrompt: row.generation_prompt,
