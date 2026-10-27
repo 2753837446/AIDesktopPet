@@ -10,11 +10,16 @@ import {
   parsePersonaPackage,
   serializePersonaPackage,
 } from "../../shared/persona-package";
-import { parseCharacterPoseInstruction } from "../../shared/character-pose-command";
+import {
+  inferCharacterCompositionMode,
+  parseCharacterPoseInstruction,
+} from "../../shared/character-pose-command";
 import type {
   AssistantStreamEvent,
   AuditLogRecord,
   CharacterAsset,
+  CharacterAssetCategory,
+  CharacterCompositionMode,
   CharacterView,
   ConnectorRecord,
   DailyBriefRecord,
@@ -28,6 +33,7 @@ import type {
 } from "../../core/domain";
 
 type LoadState = "loading" | "ready" | "error";
+type StageAssetCategory = Exclude<CharacterAssetCategory, "scene">;
 type AppView =
   | "pet"
   | "settings"
@@ -231,8 +237,18 @@ export function App(): React.JSX.Element {
           bootstrap={bootstrap}
           onClose={() => void returnToPet()}
           onOpenSettings={() => void openSettings()}
-          onCharacterSelected={(customCharacterId) =>
-            void updateSettings({ appearance: { customCharacterId } })
+          onCharacterSelected={(asset) =>
+            void updateSettings({
+              appearance: {
+                customCharacterId: asset.id,
+                ...(asset.category === "scene"
+                  ? {
+                      customBackgroundId: null,
+                      customPropIds: [],
+                    }
+                  : {}),
+              },
+            })
           }
         />
       ) : view === "memory" ? (
@@ -322,14 +338,12 @@ function PetStage({
         </span>
       </div>
 
-      <div
-        className="character-wrap"
-        style={{ transform: `scale(${settings.appearance.scale})` }}
-      >
-        <CharacterVisual
-          customCharacterId={settings.appearance.customCharacterId}
-        />
-      </div>
+      <CharacterVisual
+        customCharacterId={settings.appearance.customCharacterId}
+        customBackgroundId={settings.appearance.customBackgroundId}
+        customPropIds={settings.appearance.customPropIds}
+        scale={settings.appearance.scale}
+      />
 
       <div className="pet-footer no-drag">
         <div className="availability">
@@ -367,7 +381,7 @@ interface ChatPanelProps {
   bootstrap: DesktopBootstrap;
   onClose: () => void;
   onOpenSettings: () => void;
-  onCharacterSelected: (customCharacterId: string) => void;
+  onCharacterSelected: (asset: CharacterAsset) => void;
 }
 
 function ChatPanel({
@@ -389,6 +403,7 @@ function ChatPanel({
   const [poseProposal, setPoseProposal] = useState<{
     originalText: string;
     instruction: string;
+    compositionMode: CharacterCompositionMode;
   } | null>(null);
   const [poseGenerating, setPoseGenerating] = useState(false);
   const [poseRequestId, setPoseRequestId] = useState<string | null>(null);
@@ -502,6 +517,7 @@ function ChatPanel({
         requestId,
         sourceAssetId,
         instruction: poseProposal.instruction,
+        compositionMode: poseProposal.compositionMode,
       });
       setPoseCandidate(asset);
       setPoseProposal(null);
@@ -541,7 +557,11 @@ function ChatPanel({
     const poseInstruction = parseCharacterPoseInstruction(text);
     if (poseInstruction) {
       setDraft("");
-      setPoseProposal({ originalText: text, instruction: poseInstruction });
+      setPoseProposal({
+        originalText: text,
+        instruction: poseInstruction,
+        compositionMode: inferCharacterCompositionMode(text),
+      });
       setPoseCandidate(null);
       setPoseError("");
       return;
@@ -639,14 +659,23 @@ function ChatPanel({
             )}
             {poseProposal && !poseGenerating ? (
               <article className="chat-pose-card">
-                <span className="message-role">动作导演 · 待确认</span>
-                <strong>要把这条聊天指令变成新姿态吗？</strong>
+                <span className="message-role">角色与场景导演 · 待确认</span>
+                <strong>
+                  要把这条聊天指令变成
+                  {poseProposal.compositionMode === "scene"
+                    ? "完整场景"
+                    : "新姿态"}
+                  吗？
+                </strong>
                 <p>
                   “{poseProposal.originalText}” → 姿态：
                   {poseProposal.instruction}
                 </p>
                 <small>
                   将参考当前自定义形象并发送给 {bootstrap.meta.imageGenerationModel}。
+                  {poseProposal.compositionMode === "scene"
+                    ? "本次会把角色、道具和背景合成为一张新场景图。"
+                    : "本次只改变角色姿态。"}
                   可能产生平台费用；结果先预览，不会自动替换形象。
                 </small>
                 <div className="chat-pose-actions">
@@ -690,7 +719,10 @@ function ChatPanel({
               <article className="chat-pose-candidate">
                 <CharacterAssetThumbnail asset={poseCandidate} />
                 <div>
-                  <span className="message-role">动作导演 · 新姿态</span>
+                  <span className="message-role">
+                    角色与场景导演 ·{" "}
+                    {poseCandidate.category === "scene" ? "新场景" : "新姿态"}
+                  </span>
                   <strong>{poseCandidate.generationPrompt}</strong>
                   <small>{poseCandidate.generationModel}</small>
                 </div>
@@ -706,7 +738,7 @@ function ChatPanel({
                     className="primary-button"
                     type="button"
                     onClick={() => {
-                      onCharacterSelected(poseCandidate.id);
+                      onCharacterSelected(poseCandidate);
                       setPoseCandidate(null);
                     }}
                   >
@@ -1959,6 +1991,8 @@ function SettingsPanel({
   );
   const [characterUploadView, setCharacterUploadView] =
     useState<CharacterView>("idle");
+  const [characterUploadCategory, setCharacterUploadCategory] =
+    useState<StageAssetCategory>("character");
   const [characterMessage, setCharacterMessage] = useState("");
   const [characterBusy, setCharacterBusy] = useState(false);
   const [poseInstruction, setPoseInstruction] = useState("");
@@ -1967,6 +2001,8 @@ function SettingsPanel({
   const [poseRequestId, setPoseRequestId] = useState<string | null>(null);
   const [poseCandidateId, setPoseCandidateId] = useState<string | null>(null);
   const [poseMessage, setPoseMessage] = useState("");
+  const [poseCompositionMode, setPoseCompositionMode] =
+    useState<CharacterCompositionMode>("character");
   const characterFileInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -1991,6 +2027,15 @@ function SettingsPanel({
   const selectedSourceSupportsPose =
     selectedCharacterAsset !== null &&
     selectedCharacterAsset.mimeType !== "image/gif";
+  const characterGalleryAssets = characterAssetList.filter(
+    (asset) => asset.category === "character" || asset.category === "scene",
+  );
+  const backgroundAssets = characterAssetList.filter(
+    (asset) => asset.category === "background",
+  );
+  const propAssets = characterAssetList.filter(
+    (asset) => asset.category === "prop",
+  );
 
   const saveKey = async (): Promise<void> => {
     if (!window.desktop || !keyDraft.trim()) {
@@ -2157,11 +2202,36 @@ function SettingsPanel({
       const asset = await window.desktop.uploadCharacterAsset({
         fileName: file.name,
         bytes: new Uint8Array(await file.arrayBuffer()),
-        view: characterUploadView,
+        view:
+          characterUploadCategory === "character"
+            ? characterUploadView
+            : "idle",
+        category: characterUploadCategory,
       });
       setCharacterAssetList(await window.desktop.listCharacterAssets());
-      onUpdate({ appearance: { customCharacterId: asset.id } });
-      setCharacterMessage(`已上传并切换到「${asset.displayName}」。`);
+      if (asset.category === "background") {
+        onUpdate({ appearance: { customBackgroundId: asset.id } });
+        setCharacterMessage(`已上传背景「${asset.displayName}」。`);
+      } else if (asset.category === "prop") {
+        onUpdate({
+          appearance: {
+            customPropIds: [
+              ...settings.appearance.customPropIds.slice(0, 2),
+              asset.id,
+            ],
+          },
+        });
+        setCharacterMessage(`已上传道具「${asset.displayName}」并加入舞台。`);
+      } else {
+        onUpdate({
+          appearance: {
+            customCharacterId: asset.id,
+            customBackgroundId: null,
+            customPropIds: [],
+          },
+        });
+        setCharacterMessage(`已上传并切换到「${asset.displayName}」。`);
+      }
     } catch (error) {
       console.error("上传角色图片失败", error);
       setCharacterMessage("上传失败：请使用 PNG、GIF 或 WebP 图片。");
@@ -2178,8 +2248,23 @@ function SettingsPanel({
     try {
       await window.desktop.deleteCharacterAsset(asset.id);
       setCharacterAssetList(await window.desktop.listCharacterAssets());
+      const appearancePatch: {
+        customCharacterId?: null;
+        customBackgroundId?: null;
+        customPropIds?: string[];
+      } = {};
       if (settings.appearance.customCharacterId === asset.id) {
-        onUpdate({ appearance: { customCharacterId: null } });
+        appearancePatch.customCharacterId = null;
+      }
+      if (settings.appearance.customBackgroundId === asset.id) {
+        appearancePatch.customBackgroundId = null;
+      }
+      if (settings.appearance.customPropIds.includes(asset.id)) {
+        appearancePatch.customPropIds =
+          settings.appearance.customPropIds.filter((id) => id !== asset.id);
+      }
+      if (Object.keys(appearancePatch).length > 0) {
+        onUpdate({ appearance: appearancePatch });
       }
       if (poseCandidateId === asset.id) {
         setPoseCandidateId(null);
@@ -2191,6 +2276,16 @@ function SettingsPanel({
     } finally {
       setCharacterBusy(false);
     }
+  };
+
+  const toggleProp = (assetId: string): void => {
+    const selected = settings.appearance.customPropIds;
+    const customPropIds = selected.includes(assetId)
+      ? selected.filter((id) => id !== assetId)
+      : selected.length < 3
+        ? [...selected, assetId]
+        : selected;
+    onUpdate({ appearance: { customPropIds } });
   };
 
   const preparePoseGeneration = (): void => {
@@ -2222,16 +2317,25 @@ function SettingsPanel({
     setPoseConfirmationVisible(false);
     setPoseGenerating(true);
     setPoseRequestId(requestId);
-    setPoseMessage("正在生成新姿态，原形象不会被覆盖…");
+    setPoseMessage(
+      poseCompositionMode === "scene"
+        ? "正在生成角色与场景，原形象不会被覆盖…"
+        : "正在生成新姿态，原形象不会被覆盖…",
+    );
     try {
       const asset = await window.desktop.generateCharacterPose({
         requestId,
         sourceAssetId: selectedCharacterAsset.id,
         instruction: poseInstruction.trim(),
+        compositionMode: poseCompositionMode,
       });
       setCharacterAssetList(await window.desktop.listCharacterAssets());
       setPoseCandidateId(asset.id);
-      setPoseMessage("AI 姿态已生成。确认满意后再设为桌宠。");
+      setPoseMessage(
+        asset.category === "scene"
+          ? "AI 场景已生成。确认满意后再设为桌宠。"
+          : "AI 姿态已生成。确认满意后再设为桌宠。",
+      );
     } catch (error) {
       console.error("生成角色姿态失败", error);
       setPoseMessage(characterPoseErrorMessage(error));
@@ -2408,27 +2512,42 @@ function SettingsPanel({
             <div className="character-assets-heading">
               <div>
                 <strong>桌宠形象</strong>
-                <p>支持透明 PNG、GIF、WebP；单张最大 10 MB。</p>
+                <p>角色、背景与道具分层组合；单张最大 10 MB。</p>
               </div>
               <div>
                 <select
-                  aria-label="图片视图"
-                  value={characterUploadView}
+                  aria-label="资产类型"
+                  value={characterUploadCategory}
                   onChange={(event) =>
-                    setCharacterUploadView(
-                      event.target.value as CharacterView,
+                    setCharacterUploadCategory(
+                      event.target.value as StageAssetCategory,
                     )
                   }
                 >
-                  <option value="idle">待机</option>
-                  <option value="talking">说话</option>
-                  <option value="thinking">思考</option>
-                  <option value="front">正面</option>
-                  <option value="left">左侧</option>
-                  <option value="right">右侧</option>
-                  <option value="back">背面</option>
-                  <option value="sleeping">睡眠</option>
+                  <option value="character">角色</option>
+                  <option value="background">背景</option>
+                  <option value="prop">透明道具</option>
                 </select>
+                {characterUploadCategory === "character" ? (
+                  <select
+                    aria-label="图片视图"
+                    value={characterUploadView}
+                    onChange={(event) =>
+                      setCharacterUploadView(
+                        event.target.value as CharacterView,
+                      )
+                    }
+                  >
+                    <option value="idle">待机</option>
+                    <option value="talking">说话</option>
+                    <option value="thinking">思考</option>
+                    <option value="front">正面</option>
+                    <option value="left">左侧</option>
+                    <option value="right">右侧</option>
+                    <option value="back">背面</option>
+                    <option value="sleeping">睡眠</option>
+                  </select>
+                ) : null}
                 <button
                   className="secondary-panel-button"
                   type="button"
@@ -2461,7 +2580,7 @@ function SettingsPanel({
                 <span className="builtin-character-preview">湛</span>
                 <strong>内置阿湛</strong>
               </button>
-              {characterAssetList.map((asset) => (
+              {characterGalleryAssets.map((asset) => (
                 <article
                   className={
                     settings.appearance.customCharacterId === asset.id
@@ -2475,7 +2594,15 @@ function SettingsPanel({
                     type="button"
                     onClick={() =>
                       onUpdate({
-                        appearance: { customCharacterId: asset.id },
+                        appearance: {
+                          customCharacterId: asset.id,
+                          ...(asset.category === "scene"
+                            ? {
+                                customBackgroundId: null,
+                                customPropIds: [],
+                              }
+                            : {}),
+                        },
                       })
                     }
                   >
@@ -2484,7 +2611,11 @@ function SettingsPanel({
                     <small>
                       {characterViewLabel(asset.view)} · {asset.width}×{asset.height}
                     </small>
-                    {asset.origin === "ai_generated" ? (
+                    {asset.category === "scene" ? (
+                      <span className="character-origin-badge scene">
+                        完整场景
+                      </span>
+                    ) : asset.origin === "ai_generated" ? (
                       <span className="character-origin-badge">AI 姿态</span>
                     ) : null}
                   </button>
@@ -2499,14 +2630,142 @@ function SettingsPanel({
                 </article>
               ))}
             </div>
+            <div className="stage-layer-heading">
+              <div>
+                <strong>背景层</strong>
+                <small>默认透明；选择图片后才铺满桌宠窗口。</small>
+              </div>
+              <button
+                className={
+                  settings.appearance.customBackgroundId === null
+                    ? "layer-reset selected"
+                    : "layer-reset"
+                }
+                type="button"
+                onClick={() =>
+                  onUpdate({ appearance: { customBackgroundId: null } })
+                }
+              >
+                透明背景（默认）
+              </button>
+            </div>
+            <div className="character-gallery stage-layer-gallery">
+              {backgroundAssets.length === 0 ? (
+                <p className="stage-layer-empty">
+                  上传一张房间、窗外或纯色背景图。
+                </p>
+              ) : (
+                backgroundAssets.map((asset) => (
+                  <article
+                    className={
+                      settings.appearance.customBackgroundId === asset.id
+                        ? "character-option stage-layer-option selected"
+                        : "character-option stage-layer-option"
+                    }
+                    key={asset.id}
+                  >
+                    <button
+                      className="character-select"
+                      type="button"
+                      onClick={() =>
+                        onUpdate({
+                          appearance: { customBackgroundId: asset.id },
+                        })
+                      }
+                    >
+                      <CharacterAssetThumbnail asset={asset} />
+                      <strong>{asset.displayName}</strong>
+                      <small>背景</small>
+                    </button>
+                    <button
+                      className="character-delete"
+                      type="button"
+                      aria-label={`删除 ${asset.displayName}`}
+                      onClick={() => void deleteCharacter(asset)}
+                    >
+                      ×
+                    </button>
+                  </article>
+                ))
+              )}
+            </div>
+
+            <div className="stage-layer-heading">
+              <div>
+                <strong>前景道具</strong>
+                <small>
+                  最多 3 个，依次放在左下、居中、右下；请上传透明 PNG/WebP。
+                </small>
+              </div>
+              <button
+                className={
+                  settings.appearance.customPropIds.length === 0
+                    ? "layer-reset selected"
+                    : "layer-reset"
+                }
+                type="button"
+                onClick={() =>
+                  onUpdate({ appearance: { customPropIds: [] } })
+                }
+              >
+                清空道具
+              </button>
+            </div>
+            <div className="character-gallery stage-layer-gallery">
+              {propAssets.length === 0 ? (
+                <p className="stage-layer-empty">
+                  上传椅子、绿植、杯子等透明前景道具。
+                </p>
+              ) : (
+                propAssets.map((asset) => {
+                  const selected = settings.appearance.customPropIds.includes(
+                    asset.id,
+                  );
+                  const slot =
+                    settings.appearance.customPropIds.indexOf(asset.id) + 1;
+                  return (
+                    <article
+                      className={
+                        selected
+                          ? "character-option stage-layer-option selected"
+                          : "character-option stage-layer-option"
+                      }
+                      key={asset.id}
+                    >
+                      <button
+                        className="character-select"
+                        type="button"
+                        disabled={
+                          !selected &&
+                          settings.appearance.customPropIds.length >= 3
+                        }
+                        onClick={() => toggleProp(asset.id)}
+                      >
+                        <CharacterAssetThumbnail asset={asset} />
+                        <strong>{asset.displayName}</strong>
+                        <small>{selected ? `道具槽 ${slot}` : "点击加入舞台"}</small>
+                      </button>
+                      <button
+                        className="character-delete"
+                        type="button"
+                        aria-label={`删除 ${asset.displayName}`}
+                        onClick={() => void deleteCharacter(asset)}
+                      >
+                        ×
+                      </button>
+                    </article>
+                  );
+                })
+              )}
+            </div>
             {characterMessage ? (
               <p className="provider-message">{characterMessage}</p>
             ) : null}
             <div className="character-pose-director">
               <div className="character-pose-heading">
                 <div>
-                  <strong>AI 姿态导演</strong>
-                  <p>用一句话改变姿态，生成结果先作为新形象预览。</p>
+                  <strong>AI 角色与场景导演</strong>
+                  <p>改变姿态，或把角色、道具和背景合成为完整场景。</p>
                 </div>
                 <span
                   className={
@@ -2518,12 +2777,45 @@ function SettingsPanel({
                   {meta.imageGenerationConfigured ? "图像服务已配置" : "需配置"}
                 </span>
               </div>
+              <div
+                className="segmented-control composition-mode"
+                aria-label="AI 生成模式"
+              >
+                <button
+                  className={
+                    poseCompositionMode === "character" ? "selected" : ""
+                  }
+                  type="button"
+                  disabled={poseGenerating}
+                  onClick={() => {
+                    setPoseCompositionMode("character");
+                    setPoseConfirmationVisible(false);
+                  }}
+                >
+                  仅角色姿态
+                </button>
+                <button
+                  className={poseCompositionMode === "scene" ? "selected" : ""}
+                  type="button"
+                  disabled={poseGenerating}
+                  onClick={() => {
+                    setPoseCompositionMode("scene");
+                    setPoseConfirmationVisible(false);
+                  }}
+                >
+                  角色与完整场景
+                </button>
+              </div>
               <textarea
                 aria-label="AI 姿态描述"
                 value={poseInstruction}
                 maxLength={500}
                 rows={3}
-                placeholder="例如：让她自然坐在一张简单的凳子上，正面全身，保持原衣着和画风。"
+                placeholder={
+                  poseCompositionMode === "scene"
+                    ? "例如：让她坐在咖啡馆的木椅上，旁边有一盆绿植和咖啡杯，保持原衣着和画风。"
+                    : "例如：让她自然坐在一张简单的凳子上，正面全身，保持原衣着和画风。"
+                }
                 disabled={poseGenerating}
                 onChange={(event) => {
                   setPoseInstruction(event.target.value);
@@ -2559,14 +2851,21 @@ function SettingsPanel({
                 >
                   <strong>确认把参考图发送到云端并生成？</strong>
                   <p>
-                    参考：{selectedCharacterAsset.displayName} · 姿态：
+                    模式：
+                    {poseCompositionMode === "scene"
+                      ? "角色 + 道具 + 背景完整场景"
+                      : "仅角色姿态"}
+                    · 参考：{selectedCharacterAsset.displayName} · 描述：
                     {poseInstruction.trim()}
                   </p>
                   <p>
                     模型：{meta.imageGenerationModel}。会向硅基流动上传这张角色参考图和姿态描述，
                     可能按平台规则产生费用，实际以账户账单为准。
                   </p>
-                  <p>只生成新候选，不会覆盖原图或自动切换桌宠。</p>
+                  <p>
+                    只生成新的{poseCompositionMode === "scene" ? "场景" : "姿态"}
+                    候选，不会覆盖原图或自动切换桌宠。
+                  </p>
                   <div className="character-pose-confirmation-actions">
                     <button
                       className="text-button"
@@ -2588,7 +2887,11 @@ function SettingsPanel({
 
               {poseGenerating ? (
                 <div className="character-pose-progress" role="status">
-                  <span>正在生成姿态，通常需要数秒到一分钟。</span>
+                  <span>
+                    正在生成
+                    {poseCompositionMode === "scene" ? "角色与场景" : "姿态"}
+                    ，通常需要数秒到一分钟。
+                  </span>
                   <button
                     className="danger-text-button"
                     type="button"
@@ -2603,7 +2906,11 @@ function SettingsPanel({
                 <div className="character-pose-candidate">
                   <CharacterAssetThumbnail asset={poseCandidate} />
                   <div>
-                    <strong>新姿态预览</strong>
+                    <strong>
+                      {poseCandidate.category === "scene"
+                        ? "完整场景预览"
+                        : "新姿态预览"}
+                    </strong>
                     <p>{poseCandidate.generationPrompt}</p>
                     <small>
                       {poseCandidate.generationModel} · 原形象仍已保留
@@ -2614,9 +2921,21 @@ function SettingsPanel({
                     type="button"
                     onClick={() => {
                       onUpdate({
-                        appearance: { customCharacterId: poseCandidate.id },
+                        appearance: {
+                          customCharacterId: poseCandidate.id,
+                          ...(poseCandidate.category === "scene"
+                            ? {
+                                customBackgroundId: null,
+                                customPropIds: [],
+                              }
+                            : {}),
+                        },
                       });
-                      setPoseMessage("已将 AI 姿态设为桌宠，可随时从画廊切回原图。");
+                      setPoseMessage(
+                        poseCandidate.category === "scene"
+                          ? "已将完整场景设为桌宠；独立背景与道具已让位，可随时切回。"
+                          : "已将 AI 姿态设为桌宠，可随时从画廊切回原图。",
+                      );
                     }}
                   >
                     设为桌宠
@@ -2954,31 +3273,121 @@ function characterPoseErrorMessage(error: unknown): string {
 
 function CharacterVisual({
   customCharacterId,
+  customBackgroundId,
+  customPropIds,
+  scale,
 }: {
   customCharacterId: string | null;
+  customBackgroundId: string | null;
+  customPropIds: string[];
+  scale: number;
 }): React.JSX.Element {
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const character = useCharacterAssetImage(customCharacterId);
+  const background = useCharacterAssetImage(customBackgroundId);
+
+  if (character.asset?.category === "scene" && character.url) {
+    return (
+      <div className="character-stage">
+        <img
+          className="custom-scene-image"
+          src={character.url}
+          alt="AI 完整桌宠场景"
+          draggable={false}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="character-stage">
+      {background.url ? (
+        <img
+          className="stage-background-image"
+          src={background.url}
+          alt="桌宠背景"
+          draggable={false}
+        />
+      ) : null}
+      <div
+        className="character-wrap"
+        style={{ transform: `scale(${scale})` }}
+      >
+        {customPropIds.slice(0, 3).map((id, index) => (
+          <StagePropImage
+            key={`${id}:${index}`}
+            id={id}
+            slot={index}
+          />
+        ))}
+        {character.url ? (
+          <img
+            className="custom-character-image"
+            src={character.url}
+            alt="自定义桌宠形象"
+            draggable={false}
+          />
+        ) : (
+          <AzureCharacter />
+        )}
+        {character.failed ? (
+          <span className="character-load-error">形象读取失败</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StagePropImage({
+  id,
+  slot,
+}: {
+  id: string;
+  slot: number;
+}): React.JSX.Element | null {
+  const prop = useCharacterAssetImage(id);
+  if (!prop.url) {
+    return null;
+  }
+  return (
+    <img
+      className={`stage-prop-image slot-${slot}`}
+      src={prop.url}
+      alt={`前景道具 ${slot + 1}`}
+      draggable={false}
+    />
+  );
+}
+
+function useCharacterAssetImage(id: string | null): {
+  asset: CharacterAsset | null;
+  url: string | null;
+  failed: boolean;
+} {
+  const [asset, setAsset] = useState<CharacterAsset | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    setImageUrl(null);
+    setAsset(null);
+    setUrl(null);
     setFailed(false);
-    if (!customCharacterId || !window.desktop) {
+    if (!id || !window.desktop) {
       return undefined;
     }
     let active = true;
     let objectUrl: string | null = null;
     void window.desktop
-      .getCharacterAssetData(customCharacterId)
-      .then(({ asset, bytes }) => {
+      .getCharacterAssetData(id)
+      .then(({ asset: loaded, bytes }) => {
         if (!active) {
           return;
         }
-        objectUrl = URL.createObjectURL(imageBlob(bytes, asset.mimeType));
-        setImageUrl(objectUrl);
+        objectUrl = URL.createObjectURL(imageBlob(bytes, loaded.mimeType));
+        setAsset(loaded);
+        setUrl(objectUrl);
       })
       .catch((error: unknown) => {
-        console.error("加载自定义桌宠形象失败", error);
+        console.error("加载桌宠舞台资产失败", error);
         if (active) {
           setFailed(true);
         }
@@ -2989,24 +3398,9 @@ function CharacterVisual({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [customCharacterId]);
+  }, [id]);
 
-  if (customCharacterId && imageUrl) {
-    return (
-      <img
-        className="custom-character-image"
-        src={imageUrl}
-        alt="自定义桌宠形象"
-        draggable={false}
-      />
-    );
-  }
-  return (
-    <>
-      <AzureCharacter />
-      {failed ? <span className="character-load-error">形象读取失败</span> : null}
-    </>
-  );
+  return { asset, url, failed };
 }
 
 function CharacterAssetThumbnail({

@@ -260,6 +260,12 @@ export type CharacterImageMimeType =
   | "image/jpeg";
 
 export type CharacterAssetOrigin = "upload" | "ai_generated";
+export type CharacterAssetCategory =
+  | "character"
+  | "scene"
+  | "prop"
+  | "background";
+export type CharacterCompositionMode = "character" | "scene";
 
 export interface CharacterAsset {
   id: string;
@@ -269,6 +275,7 @@ export interface CharacterAsset {
   width: number;
   height: number;
   sizeBytes: number;
+  category: CharacterAssetCategory;
   origin: CharacterAssetOrigin;
   sourceAssetId: string | null;
   generationPrompt: string | null;

@@ -49,6 +49,8 @@ export interface PersonaSettings {
 export interface AppearanceSettings {
   character: "azure";
   customCharacterId: string | null;
+  customBackgroundId: string | null;
+  customPropIds: string[];
   scale: number;
 }
 
@@ -121,6 +123,8 @@ export const DEFAULT_SETTINGS: DesktopSettings = {
   appearance: {
     character: "azure",
     customCharacterId: null,
+    customBackgroundId: null,
+    customPropIds: [],
     scale: 1,
   },
 };

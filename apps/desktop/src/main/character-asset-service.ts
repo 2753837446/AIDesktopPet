@@ -3,7 +3,9 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   CharacterAsset,
+  CharacterAssetCategory,
   CharacterAssetOrigin,
+  CharacterCompositionMode,
   CharacterView,
 } from "../core/domain";
 import { detectImage } from "./character-image";
@@ -43,10 +45,12 @@ export class CharacterAssetService {
     fileName: string;
     bytes: Uint8Array;
     view: CharacterView;
+    category: Exclude<CharacterAssetCategory, "scene">;
     displayName?: string;
   }): Promise<CharacterAsset> {
     return this.persist({
       ...input,
+      category: input.category,
       origin: "upload",
       sourceAssetId: null,
       generationPrompt: null,
@@ -60,6 +64,7 @@ export class CharacterAssetService {
     bytes: Uint8Array;
     instruction: string;
     model: string;
+    compositionMode: CharacterCompositionMode;
   }): Promise<CharacterAsset> {
     const source = this.repository.get(input.sourceAssetId);
     if (!source) {
@@ -73,7 +78,10 @@ export class CharacterAssetService {
       fileName: "ai-pose.png",
       bytes: input.bytes,
       view: "idle",
-      displayName: `${source.displayName} · AI 姿态`,
+      category: input.compositionMode === "scene" ? "scene" : "character",
+      displayName: `${source.displayName} · ${
+        input.compositionMode === "scene" ? "AI 场景" : "AI 姿态"
+      }`,
       origin: "ai_generated",
       sourceAssetId: source.id,
       generationPrompt: prompt,
@@ -87,6 +95,7 @@ export class CharacterAssetService {
     bytes: Uint8Array;
     view: CharacterView;
     displayName?: string;
+    category: CharacterAssetCategory;
     origin: CharacterAssetOrigin;
     sourceAssetId: string | null;
     generationPrompt: string | null;
@@ -131,6 +140,7 @@ export class CharacterAssetService {
       width: detected.width,
       height: detected.height,
       sizeBytes: input.bytes.byteLength,
+      category: input.category,
       origin: input.origin,
       sourceAssetId: input.sourceAssetId,
       generationPrompt: input.generationPrompt,
@@ -188,6 +198,7 @@ function toPublicAsset(asset: StoredCharacterAsset): CharacterAsset {
     width: asset.width,
     height: asset.height,
     sizeBytes: asset.sizeBytes,
+    category: asset.category,
     origin: asset.origin,
     sourceAssetId: asset.sourceAssetId,
     generationPrompt: asset.generationPrompt,

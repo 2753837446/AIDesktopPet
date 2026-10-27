@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   CharacterAsset,
+  CharacterAssetCategory,
   CharacterAssetOrigin,
   CharacterImageMimeType,
   CharacterView,
@@ -19,6 +20,7 @@ interface CharacterRow {
   height: number;
   size_bytes: number;
   file_path: string;
+  category: CharacterAssetCategory;
   origin: CharacterAssetOrigin;
   source_asset_id: string | null;
   generation_prompt: string | null;
@@ -35,9 +37,9 @@ export class SqliteCharacterAssetRepository {
       .prepare(
         `INSERT INTO character_assets
           (id, display_name, view, mime_type, width, height, size_bytes,
-           file_path, origin, source_asset_id, generation_prompt,
+           file_path, category, origin, source_asset_id, generation_prompt,
            generation_model, generated_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         asset.id,
@@ -48,6 +50,7 @@ export class SqliteCharacterAssetRepository {
         asset.height,
         asset.sizeBytes,
         asset.filePath,
+        asset.category,
         asset.origin,
         asset.sourceAssetId,
         asset.generationPrompt,
@@ -92,6 +95,7 @@ function mapAsset(row: CharacterRow): CharacterAsset {
     width: row.width,
     height: row.height,
     sizeBytes: row.size_bytes,
+    category: row.category,
     origin: row.origin,
     sourceAssetId: row.source_asset_id,
     generationPrompt: row.generation_prompt,

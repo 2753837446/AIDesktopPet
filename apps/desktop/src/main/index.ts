@@ -963,6 +963,7 @@ function registerIpcHandlers(): void {
         fileName: parsed.fileName,
         bytes: parsed.bytes,
         view: parsed.view,
+        category: parsed.category,
         ...(parsed.displayName === undefined
           ? {}
           : { displayName: parsed.displayName }),
@@ -1024,6 +1025,7 @@ function registerIpcHandlers(): void {
         const asset = await characterPoseDirector.generate({
           sourceAssetId: parsed.sourceAssetId,
           instruction: parsed.instruction,
+          compositionMode: parsed.compositionMode,
           signal: controller.signal,
         });
         recordPoseAudit({
@@ -1130,6 +1132,7 @@ const characterUploadSchema = z
       "thinking",
       "sleeping",
     ]),
+    category: z.enum(["character", "prop", "background"]),
     displayName: z.string().trim().min(1).max(80).optional(),
   })
   .strict();
@@ -1139,6 +1142,7 @@ const characterPoseGenerationSchema = z
     requestId: z.string().uuid(),
     sourceAssetId: z.string().uuid(),
     instruction: z.string().trim().min(2).max(500),
+    compositionMode: z.enum(["character", "scene"]),
   })
   .strict();
 

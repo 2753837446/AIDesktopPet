@@ -7,6 +7,8 @@ import type {
   AssistantStreamEvent,
   AuditLogRecord,
   CharacterAsset,
+  CharacterAssetCategory,
+  CharacterCompositionMode,
   CharacterView,
   ConnectorRecord,
   CreateTaskInput,
@@ -93,6 +95,7 @@ export interface DesktopApi {
     fileName: string;
     bytes: Uint8Array;
     view: CharacterView;
+    category: Exclude<CharacterAssetCategory, "scene">;
     displayName?: string;
   }): Promise<CharacterAsset>;
   getCharacterAssetData(id: string): Promise<{
@@ -104,6 +107,7 @@ export interface DesktopApi {
     requestId: string;
     sourceAssetId: string;
     instruction: string;
+    compositionMode: CharacterCompositionMode;
   }): Promise<CharacterAsset>;
   cancelCharacterPoseGeneration(
     requestId: string,

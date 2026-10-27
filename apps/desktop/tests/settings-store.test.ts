@@ -37,6 +37,8 @@ describe("SettingsStore", () => {
       end: "07:00",
     });
     expect(result.settings.persona.name).toBe("阿湛");
+    expect(result.settings.appearance.customBackgroundId).toBeNull();
+    expect(result.settings.appearance.customPropIds).toEqual([]);
 
     const persisted = JSON.parse(
       await readFile(path.join(directory, "settings.json"), "utf8"),
@@ -80,6 +82,18 @@ describe("SettingsStore", () => {
       store.update({ proactive: { quietHours: { start: "25:00" } } }),
     ).rejects.toThrow();
     await expect(store.update({ appearance: { scale: 2 } })).rejects.toThrow();
+    await expect(
+      store.update({
+        appearance: {
+          customPropIds: [
+            "00000000-0000-4000-8000-000000000001",
+            "00000000-0000-4000-8000-000000000002",
+            "00000000-0000-4000-8000-000000000003",
+            "00000000-0000-4000-8000-000000000004",
+          ],
+        },
+      }),
+    ).rejects.toThrow();
     await expect(
       store.update({ persona: { replyLength: "verbose" } }),
     ).rejects.toThrow();

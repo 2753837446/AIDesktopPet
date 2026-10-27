@@ -61,6 +61,7 @@ describe("角色图片资产", () => {
       fileName: "avatar.png",
       bytes: ONE_PIXEL_PNG,
       view: "idle",
+      category: "character",
       displayName: "测试形象",
     });
     expect(service.list()).toHaveLength(1);
@@ -84,6 +85,7 @@ describe("角色图片资产", () => {
       fileName: "avatar.png",
       bytes: ONE_PIXEL_PNG,
       view: "front",
+      category: "character",
       displayName: "原始形象",
     });
     const generated = await service.saveGenerated({
@@ -91,10 +93,12 @@ describe("角色图片资产", () => {
       bytes: MINIMAL_JPEG,
       instruction: "坐在凳子上",
       model: "Qwen/Qwen-Image-Edit-2509",
+      compositionMode: "character",
     });
 
     expect(generated).toMatchObject({
       origin: "ai_generated",
+      category: "character",
       sourceAssetId: source.id,
       generationPrompt: "坐在凳子上",
       generationModel: "Qwen/Qwen-Image-Edit-2509",
@@ -106,6 +110,59 @@ describe("角色图片资产", () => {
 
     expect(await service.delete(source.id)).toBe(true);
     expect(service.list().map((asset) => asset.id)).toEqual([generated.id]);
+    opened.database.close();
+  });
+
+  it("支持背景、道具与完整场景分类", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "pet-character-"));
+    directories.push(directory);
+    const opened = openDatabase(":memory:");
+    const service = new CharacterAssetService(
+      directory,
+      new SqliteCharacterAssetRepository(opened.database),
+    );
+    const source = await service.save({
+      fileName: "avatar.png",
+      bytes: ONE_PIXEL_PNG,
+      view: "idle",
+      category: "character",
+      displayName: "角色",
+    });
+    const background = await service.save({
+      fileName: "room.png",
+      bytes: ONE_PIXEL_PNG,
+      view: "idle",
+      category: "background",
+      displayName: "房间",
+    });
+    const prop = await service.save({
+      fileName: "chair.png",
+      bytes: ONE_PIXEL_PNG,
+      view: "idle",
+      category: "prop",
+      displayName: "椅子",
+    });
+    const scene = await service.saveGenerated({
+      sourceAssetId: source.id,
+      bytes: ONE_PIXEL_PNG,
+      instruction: "坐在椅子上，背景是咖啡馆",
+      model: "Qwen/Qwen-Image-Edit-2509",
+      compositionMode: "scene",
+    });
+
+    expect(
+      service.list().map(({ category, displayName }) => ({
+        category,
+        displayName,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        { category: "background", displayName: background.displayName },
+        { category: "prop", displayName: prop.displayName },
+        { category: "scene", displayName: scene.displayName },
+      ]),
+    );
+    expect(scene.category).toBe("scene");
     opened.database.close();
   });
 
@@ -123,6 +180,7 @@ describe("角色图片资产", () => {
         fileName: "large.png",
         bytes: new Uint8Array(10 * 1024 * 1024 + 1),
         view: "idle",
+        category: "character",
       }),
     ).rejects.toThrow("INVALID_CHARACTER_IMAGE_SIZE");
     opened.database.close();

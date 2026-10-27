@@ -40,6 +40,7 @@ describe("角色姿态导演", () => {
       director.generate({
         sourceAssetId: fixture.sourceId,
         instruction: "坐在凳子上",
+        compositionMode: "character",
       }),
     ).rejects.toMatchObject({ code: "CHARACTER_POSE_TIMEOUT" });
     fixture.database.close();
@@ -56,6 +57,7 @@ describe("角色姿态导演", () => {
     const pending = director.generate({
       sourceAssetId: fixture.sourceId,
       instruction: "挥手",
+      compositionMode: "character",
       signal: controller.signal,
     });
     setTimeout(() => controller.abort(), 1);
@@ -84,6 +86,7 @@ async function createFixture(): Promise<{
     fileName: "source.png",
     bytes: ONE_PIXEL_PNG,
     view: "front",
+    category: "character",
     displayName: "参考角色",
   });
   return { assets, sourceId: source.id, database: opened.database };

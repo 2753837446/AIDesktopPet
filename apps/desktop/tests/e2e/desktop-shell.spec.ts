@@ -18,6 +18,7 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
   try {
     const window = await electronApp.firstWindow();
     await expect(window.getByTestId("pet-window")).toBeVisible();
+    await expect(window.getByAltText("桌宠背景")).toHaveCount(0);
     await expect(window.getByText("基础桌宠可用")).toBeVisible();
     await expect(window.getByText("AI 对话尚未配置")).toBeVisible();
 
@@ -105,7 +106,31 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
         ),
       });
     await expect(window.getByText(/已上传并切换到/)).toBeVisible();
-    await expect(window.getByText("AI 姿态导演")).toBeVisible();
+    await window.getByLabel("资产类型").selectOption("background");
+    await window
+      .locator('input[accept*="image/png"]')
+      .setInputFiles({
+        name: "room.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl8sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      });
+    await expect(window.getByText(/已上传背景/)).toBeVisible();
+    await window.getByLabel("资产类型").selectOption("prop");
+    await window
+      .locator('input[accept*="image/png"]')
+      .setInputFiles({
+        name: "chair.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl8sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      });
+    await expect(window.getByText(/已上传道具/)).toBeVisible();
+    await expect(window.getByText("AI 角色与场景导演")).toBeVisible();
     await expect(
       window.getByRole("button", { name: "检查并准备生成" }),
     ).toBeDisabled();
@@ -145,13 +170,17 @@ test("桌宠壳可启动并打开设置", async ({}, testInfo) => {
 
     await window.getByRole("button", { name: "返回桌宠" }).click();
     await expect(window.getByAltText("自定义桌宠形象")).toBeVisible();
+    await expect(window.getByAltText("桌宠背景")).toBeVisible();
+    await expect(window.getByAltText("前景道具 1")).toBeVisible();
     await window.getByRole("button", { name: "开始聊天" }).click();
     await expect(window.getByRole("heading", { name: "导入角色 在听" })).toBeVisible();
     await window
       .getByPlaceholder(/和导入角色说点什么/)
       .fill("让她坐在凳子上");
     await window.getByRole("button", { name: "发送" }).click();
-    await expect(window.getByText("要把这条聊天指令变成新姿态吗？")).toBeVisible();
+    await expect(
+      window.getByText(/要把这条聊天指令变成完整场景吗/),
+    ).toBeVisible();
     await expect(
       window.getByRole("button", { name: "需先配置图像服务" }),
     ).toBeDisabled();

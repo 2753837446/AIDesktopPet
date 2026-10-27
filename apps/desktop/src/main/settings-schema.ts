@@ -64,6 +64,14 @@ export const desktopSettingsSchema = z
       .object({
         character: z.literal("azure"),
         customCharacterId: z.string().uuid().nullable().default(null),
+        customBackgroundId: z.string().uuid().nullable().default(null),
+        customPropIds: z
+          .array(z.string().uuid())
+          .max(3)
+          .refine((ids) => new Set(ids).size === ids.length, {
+            message: "道具 ID 不能重复",
+          })
+          .default([]),
         scale: z.number().min(0.65).max(1.35),
       })
       .strict(),
@@ -129,6 +137,14 @@ export const desktopSettingsPatchSchema = z
       .object({
         character: z.literal("azure").optional(),
         customCharacterId: z.string().uuid().nullable().optional(),
+        customBackgroundId: z.string().uuid().nullable().optional(),
+        customPropIds: z
+          .array(z.string().uuid())
+          .max(3)
+          .refine((ids) => new Set(ids).size === ids.length, {
+            message: "道具 ID 不能重复",
+          })
+          .optional(),
         scale: z.number().min(0.65).max(1.35).optional(),
       })
       .strict()

@@ -2,7 +2,7 @@
 
 *Assistant Core、Memory Service、Task Engine、Tool Runtime 与 Connector 的接口草案*
 
-版本 V0.3 · 2026-10-27
+版本 V0.4 · 2026-10-27
 
 # 1. 设计原则
 
@@ -352,6 +352,9 @@ type CharacterView =
   | "front" | "left" | "right" | "back"
   | "idle" | "talking" | "thinking" | "sleeping";
 type CharacterAssetOrigin = "upload" | "ai_generated";
+type CharacterAssetCategory =
+  | "character" | "scene" | "prop" | "background";
+type CharacterCompositionMode = "character" | "scene";
 
 interface CharacterAsset {
   id: UUID;
@@ -361,6 +364,7 @@ interface CharacterAsset {
   width: number;
   height: number;
   sizeBytes: number;
+  category: CharacterAssetCategory;
   origin: CharacterAssetOrigin;
   sourceAssetId: UUID | null;
   generationPrompt: string | null;
@@ -373,6 +377,7 @@ uploadCharacterAsset(input: {
   fileName: string;
   bytes: Uint8Array;
   view: CharacterView;
+  category: "character" | "prop" | "background";
   displayName?: string;
 }): Promise<Result<CharacterAsset>>;
 
@@ -383,6 +388,7 @@ generateCharacterPose(input: {
   requestId: UUID;
   sourceAssetId: UUID;
   instruction: string; // 2-500 chars
+  compositionMode: CharacterCompositionMode;
 }): Promise<Result<CharacterAsset>>;
 cancelCharacterPoseGeneration(requestId: UUID): Promise<Result<{ cancelled: boolean }>>;
 ```
@@ -392,10 +398,18 @@ cancelCharacterPoseGeneration(requestId: UUID): Promise<Result<{ cancelled: bool
 AI 姿态规则：
 
 - 只使用当前选中的 PNG / WebP / JPEG 角色资产；GIF 暂不支持姿态编辑。
+- `compositionMode=character` 只生成角色；`compositionMode=scene` 允许角色、道具和背景合成，并以 `category=scene` 保存。
 - 单次只允许一个付费生成任务，总超时 120 秒，并支持 AbortController 取消。
 - 图像模型固定为 `Qwen/Qwen-Image-Edit-2509`；请求只包含单张参考图、固定保真模板和用户姿态描述。
 - 结果 URL 只接受公网 HTTPS，下载后保存为新的 `ai_generated` 资产；不覆盖源资产、不自动切换桌宠。
 - 生成成功、失败和取消写入审计；审计不保存参考图、完整提示词、密钥或模型响应正文。
+
+舞台规则：
+
+- 上传的 `background` 只作为可选底图；默认设置不包含背景，窗口保持透明。
+- `prop` 为透明前景道具，设置最多保存 3 个唯一 ID。
+- `scene` 是完整合成图，可能包含不透明背景；选择 scene 时清空独立背景和道具选择。
+- 独立图层顺序固定为 `background -> prop -> character`。
 
 # 9. 错误码建议
 

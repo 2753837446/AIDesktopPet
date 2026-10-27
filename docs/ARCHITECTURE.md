@@ -2,7 +2,7 @@
 
 *逻辑分层、数据流、存储、适配器、安全、恢复和演进路线*
 
-版本：V0.3 · 日期：2026-10-27
+版本：V0.4 · 日期：2026-10-27
 
 # 1. 架构目标
 
@@ -31,6 +31,7 @@ Windows Desktop App
        │    └─ Execution Audit
        ├─ Character Runtime
        │    ├─ Image / GIF Adapter
+       │    ├─ Layered Stage Adapter
        │    ├─ AI Pose Director
        │    ├─ Sprite Sheet Adapter
        │    ├─ Rigged 2D Adapter
@@ -124,6 +125,14 @@ Windows Desktop App
 6. 生成结果不修改 `appearance.customCharacterId`；用户预览并点击“设为桌宠”后才切换。
 7. 原图与历史候选保留，派生资产记录 `source_asset_id`、提示词、模型和生成时间；生成操作写入审计。
 
+## 5.5 分层舞台
+
+1. 背景、道具和角色使用同一受控资产存储，但通过 `category` 区分。
+2. 默认舞台不绘制背景，窗口透明区域直接显示桌面。
+3. 用户选择背景后按 `background -> props -> character` 渲染，道具最多 3 个并使用固定槽位。
+4. 完整 `scene` 资产是已合成的单张图；选择时只显示 scene，并清空独立背景与道具选择，避免重复背景。
+5. 背景和道具失败或删除时只降级对应图层，不阻塞聊天、记忆和任务。
+
 # 6. 存储方案
 
 | 存储类型 | 首版建议 | 理由 |
@@ -161,6 +170,8 @@ Windows Desktop App
 
 - UI 只依赖统一的 Character Runtime 状态接口：`idle / talking / thinking / dragging / happy / sleepy`。
 - 当前支持静态图片、GIF 和单张 AI 姿态候选；后续可增加 Sprite Sheet、分层骨骼 2D 和 GLB 3D 适配器。
+- 角色、背景、透明道具和完整场景使用分类资产；默认未选择背景时保持透明舞台。
+- 分层舞台顺序固定为背景、道具、角色和桌面 UI；完整场景不与其他图层叠加。
 - `CharacterImageEditProvider` 与聊天模型隔离，只接收参考图、姿态描述和固定模板，不读取会话、记忆、密钥或其他私人数据。
 - AI 姿态是有来源的单帧资产，不是自动绑定骨骼或可自由驱动的 3D 模型。连续动作需要动作关键帧、Sprite Sheet 或真正的 GLB 骨架与动画 Clip。
 - 多视图图片可作为 2D 转向和 3D 制作参考，但不能直接被视为自动绑定、自动动画的 3D 模型。

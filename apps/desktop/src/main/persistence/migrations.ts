@@ -436,4 +436,15 @@ export const migrations: Migration[] = [
         ON character_assets(source_asset_id);
     `,
   },
+  {
+    version: 9,
+    name: "character prop background stage categories",
+    sql: `
+      ALTER TABLE character_assets
+        ADD COLUMN category TEXT NOT NULL DEFAULT 'character'
+        CHECK(category IN ('character','scene','prop','background'));
+      CREATE INDEX idx_character_assets_category
+        ON character_assets(category, created_at);
+    `,
+  },
 ];

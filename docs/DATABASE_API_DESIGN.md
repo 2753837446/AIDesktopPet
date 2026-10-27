@@ -2,7 +2,7 @@
 
 *SQLite 数据模型、SQL 草案、索引策略、一致性、隐私与迁移规范*
 
-版本 V0.3 · 2026-10-27
+版本 V0.4 · 2026-10-27
 
 # 1. 设计约束
 
@@ -41,9 +41,9 @@
 | audit_logs | 权限、记忆修改、工具执行等审计 | 可按 trace_id 检索 |
 | settings | 非敏感用户配置 | 敏感密钥单独存储 |
 | cleanup_jobs | 异步清理索引、缓存和派生数据 | 可重试、可观测 |
-| character_assets | 上传与 AI 生成角色图片的元数据、来源和血缘 | 二进制文件保存在受控 userData 目录 |
+| character_assets | 角色、背景、道具与完整场景的元数据、来源和血缘 | 二进制文件保存在受控 userData 目录 |
 
-## 2.1 当前角色资产实际模型（migration v8）
+## 2.1 当前角色资产实际模型（migration v9）
 
 ```sql
 CREATE TABLE character_assets (
@@ -57,6 +57,8 @@ CREATE TABLE character_assets (
   height INTEGER NOT NULL CHECK(height > 0),
   size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
   file_path TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'character'
+    CHECK(category IN ('character','scene','prop','background')),
   origin TEXT NOT NULL DEFAULT 'upload'
     CHECK(origin IN ('upload','ai_generated')),
   source_asset_id TEXT,
@@ -80,10 +82,14 @@ CREATE TABLE character_assets (
 );
 CREATE INDEX idx_character_assets_created ON character_assets(created_at);
 CREATE INDEX idx_character_assets_source ON character_assets(source_asset_id);
+CREATE INDEX idx_character_assets_category
+  ON character_assets(category, created_at);
 ```
 
-- v8 将从 v7 的上传资产原样迁移为 `origin=upload`。
+- v8 将从 v7 的上传资产原样迁移为 `origin=upload`；v9 将旧资产迁移为 `category=character`。
 - AI 姿态结果保存为新行，不覆盖源资产；源资产删除后派生图仍可独立展示。
+- `background / prop` 供独立分层舞台使用，`scene` 是可能带不透明背景的完整合成图。
+- 设置中的背景和道具引用使用非敏感 UUID；删除资产后由设置写回清理失效引用。
 - 二进制文件仍按 UUID 存放于 `userData/character-assets/`，SQLite 不保存图片正文。
 - `source_asset_id` 由应用层校验，不设置级联删除，避免删除原图时连带丢失用户已保留的生成候选。
 - JPEG 仅用于兼容图像编辑服务输出；上传入口仍只接受 PNG / GIF / WebP。

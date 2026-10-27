@@ -1,4 +1,7 @@
-import type { CharacterAsset } from "../core/domain";
+import type {
+  CharacterAsset,
+  CharacterCompositionMode,
+} from "../core/domain";
 import { ModelProviderError } from "../core/errors";
 import type { CharacterImageEditProvider } from "../core/character-image-edit-provider";
 import { CharacterAssetService } from "./character-asset-service";
@@ -15,6 +18,7 @@ export class CharacterPoseDirector {
   async generate(input: {
     sourceAssetId: string;
     instruction: string;
+    compositionMode: CharacterCompositionMode;
     signal?: AbortSignal | undefined;
   }): Promise<CharacterAsset> {
     if (input.signal?.aborted) {
@@ -60,6 +64,7 @@ export class CharacterPoseDirector {
         imageBytes: source.bytes,
         mimeType: source.asset.mimeType,
         instruction: input.instruction,
+        compositionMode: input.compositionMode,
         signal: controller.signal,
       });
       try {
@@ -68,6 +73,7 @@ export class CharacterPoseDirector {
           bytes: result.imageBytes,
           instruction: input.instruction,
           model: result.model,
+          compositionMode: input.compositionMode,
         });
       } catch (error) {
         if (

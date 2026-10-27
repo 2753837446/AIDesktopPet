@@ -11,6 +11,8 @@ import type {
   CreateTaskInput,
   AuditLogRecord,
   CharacterAsset,
+  CharacterAssetCategory,
+  CharacterCompositionMode,
   CharacterView,
   ConnectorRecord,
   DailyBriefRecord,
@@ -140,6 +142,7 @@ const desktopApi: DesktopApi = {
     fileName: string;
     bytes: Uint8Array;
     view: CharacterView;
+    category: Exclude<CharacterAssetCategory, "scene">;
     displayName?: string;
   }) =>
     ipcRenderer.invoke(
@@ -159,6 +162,7 @@ const desktopApi: DesktopApi = {
     requestId: string;
     sourceAssetId: string;
     instruction: string;
+    compositionMode: CharacterCompositionMode;
   }) =>
     ipcRenderer.invoke(
       IPC_CHANNELS.generateCharacterPose,
