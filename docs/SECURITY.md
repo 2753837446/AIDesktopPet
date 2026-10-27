@@ -57,6 +57,7 @@
 - DeepSeek 与 SiliconFlow 的密钥和 token 使用 Electron `safeStorage`（Windows 下由 DPAPI 保护）或经过验证的安全存储封装。
 - 普通 `settings` 表只保存非敏感配置和密钥引用，不保存明文秘密。
 - 日志、错误消息、trace 和审计 `details_json` 不得包含完整 token、密码、邮件正文或无关私人文件。
+- 审计界面只读取受控摘要，不展示工具完整输入、密钥或邮件正文。
 - 用户必须能查看、替换和撤销连接器授权。
 - Himalaya 的 QQ 授权码已迁移到 Windows Credential Locker；`config.toml` 只保存 `password.command` 引用。应用日志和审计不得记录授权码、完整邮件正文或附件内容。
 

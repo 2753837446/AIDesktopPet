@@ -229,3 +229,16 @@ export interface ToolSummary {
   riskLevel: RiskLevel;
   requiredScopes: string[];
 }
+
+export interface AuditLogRecord {
+  id: string;
+  occurredAt: string;
+  actorType: string;
+  actorId: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  outcome: string;
+  reason: string | null;
+  traceId: string | null;
+}

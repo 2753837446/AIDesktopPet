@@ -4,7 +4,7 @@ Windows 优先的 AI 桌宠项目。桌宠是用户入口，核心能力包括 A
 
 ## 当前状态
 
-**P8 角色人格配置已实现并通过真实 DeepSeek 回归。**
+**P9 工具审计可观测性已实现，P8 人格配置已通过真实 DeepSeek 回归。**
 
 已实现：
 
@@ -32,6 +32,7 @@ Windows 优先的 AI 桌宠项目。桌宠是用户入口，核心能力包括 A
 - 人格支持预设和自定义，可配置名称、自称、称呼、性格、语气、长度、边界和主动性。
 - 人格设置支持 JSON 导入导出，下一轮对话立即生效。
 - 固定安全底座不可被人格配置覆盖。
+- 工具中心增加持久化审计记录和筛选，显示动作、结果、原因与 trace ID。
 - 未配置模型时的明确基础可用状态。
 - 设置、数据库、记忆、Assistant Core、SSE、任务调度和 Electron 端到端测试。
 
@@ -90,7 +91,7 @@ pnpm build
 
 首版目标是 Windows 10 22H2 x64 与 Windows 11 x64 上的 2D 桌宠，基础桌宠不依赖模型、Agent runtime 或 QQ/NapCat/AstrBot 才能启动。ARM64 只有在真实安装包和运行验证完成后才能纳入支持矩阵。
 
-下一阶段进入 P9：补全邮件发送/删除的真实副作用验收，接入模型 function calling、日历 Connector 和完整审计查看。DeepSeek 与 BGE-M3 的 API Key 都只能通过设置页写入 Windows DPAPI 加密文件；QQ 授权码由 Windows Credential Locker 提供。
+下一阶段进入 P10：接入模型 function calling 和日历 Connector，并在明确测试收件人后执行邮件发送/删除的真实副作用验收。DeepSeek 与 BGE-M3 的 API Key 都只能通过设置页写入 Windows DPAPI 加密文件；QQ 授权码由 Windows Credential Locker 提供。
 
 ## 仓库约束
 

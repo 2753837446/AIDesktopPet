@@ -8,6 +8,7 @@ import {
   ToolRuntimeError,
 } from "../src/core/tool-runtime";
 import { openDatabase } from "../src/main/persistence/database";
+import { SqliteAuditRepository } from "../src/main/persistence/audit-repository";
 import { SqliteConnectorRepository } from "../src/main/persistence/connector-repository";
 import { SqliteToolCallRepository } from "../src/main/persistence/tool-call-repository";
 
@@ -60,6 +61,13 @@ describe("ToolRuntime", () => {
       .prepare("SELECT COUNT(*) AS count FROM audit_logs")
       .get() as { count: number };
     expect(audits.count).toBeGreaterThanOrEqual(3);
+    expect(
+      new SqliteAuditRepository(database).list({ query: "tool.completed" })[0],
+    ).toMatchObject({
+      action: "tool.completed",
+      outcome: "completed",
+      targetId: valid.id,
+    });
   });
 
   it("高风险工具在批准前不执行", async () => {

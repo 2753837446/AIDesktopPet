@@ -5,6 +5,7 @@ import type {
 } from "./settings";
 import type {
   AssistantStreamEvent,
+  AuditLogRecord,
   ConnectorRecord,
   CreateTaskInput,
   DailyBriefRecord,
@@ -82,6 +83,7 @@ export interface DesktopApi {
   approveTool(callId: string, approved: boolean): Promise<ToolCallRecord>;
   cancelTool(callId: string): Promise<{ cancelled: boolean }>;
   listConnectors(): Promise<ConnectorRecord[]>;
+  listAuditLogs(query?: string, limit?: number): Promise<AuditLogRecord[]>;
   quit(): Promise<void>;
   onSettingsChanged(listener: (settings: DesktopSettings) => void): () => void;
   onOpenSettings(listener: () => void): () => void;
@@ -116,6 +118,7 @@ export const IPC_CHANNELS = {
   approveTool: "tools:approve",
   cancelTool: "tools:cancel",
   listConnectors: "connectors:list",
+  listAuditLogs: "audit:list",
   quit: "desktop:quit",
   settingsChanged: "desktop:settings-changed",
   openSettings: "desktop:open-settings",

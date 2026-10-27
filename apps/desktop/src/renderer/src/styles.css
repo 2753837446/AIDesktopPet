@@ -1345,6 +1345,54 @@ input {
   word-break: break-word;
 }
 
+.audit-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.audit-toolbar input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #dbe6ed;
+  border-radius: 9px;
+  background: #fff;
+  color: #29485f;
+  font-size: 10px;
+}
+
+.audit-list {
+  display: grid;
+  gap: 7px;
+}
+
+.audit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid #e5edf2;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.audit-row strong {
+  color: #29485f;
+  font-size: 10px;
+}
+
+.audit-row p {
+  margin: 3px 0 0;
+  color: #788c9c;
+  font-size: 9px;
+}
+
+.audit-row code {
+  color: #5a7488;
+  font: 9px Consolas, monospace;
+}
+
 .compose-form {
   display: grid;
   gap: 8px;

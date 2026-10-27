@@ -12,6 +12,7 @@ import {
 } from "../../shared/persona-package";
 import type {
   AssistantStreamEvent,
+  AuditLogRecord,
   ConnectorRecord,
   DailyBriefRecord,
   MemorySearchResult,
@@ -1179,6 +1180,8 @@ function DailyBriefPanel({ onClose }: CenterPanelProps): React.JSX.Element {
 function ToolCenter({ onClose }: CenterPanelProps): React.JSX.Element {
   const [tools, setTools] = useState<ToolSummary[]>([]);
   const [calls, setCalls] = useState<ToolCallRecord[]>([]);
+  const [audits, setAudits] = useState<AuditLogRecord[]>([]);
+  const [auditQuery, setAuditQuery] = useState("");
   const [connectors, setConnectors] = useState<ConnectorRecord[]>([]);
   const [runningTool, setRunningTool] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -1214,14 +1217,16 @@ function ToolCenter({ onClose }: CenterPanelProps): React.JSX.Element {
       return;
     }
     try {
-      const [toolList, callList, connectorList] = await Promise.all([
+      const [toolList, callList, connectorList, auditList] = await Promise.all([
         api.listTools(),
         api.listToolCalls(30),
         api.listConnectors(),
+        api.listAuditLogs(undefined, 100),
       ]);
       setTools(toolList);
       setCalls(callList);
       setConnectors(connectorList);
+      setAudits(auditList);
       setError("");
     } catch (loadError) {
       console.error("读取工具状态失败", loadError);
@@ -1402,6 +1407,23 @@ function ToolCenter({ onClose }: CenterPanelProps): React.JSX.Element {
     } catch (confirmationError) {
       console.error("确认邮箱操作失败", confirmationError);
       setError("确认操作失败或已过期。");
+    }
+  };
+
+  const searchAudits = async (): Promise<void> => {
+    if (!window.desktop) {
+      return;
+    }
+    try {
+      setAudits(
+        await window.desktop.listAuditLogs(
+          auditQuery.trim() || undefined,
+          200,
+        ),
+      );
+    } catch (auditError) {
+      console.error("读取审计记录失败", auditError);
+      setError("审计记录读取失败。");
     }
   };
 
@@ -1596,6 +1618,43 @@ function ToolCenter({ onClose }: CenterPanelProps): React.JSX.Element {
             )}
           </div>
         </section>
+
+        <section>
+          <h2>审计记录</h2>
+          <div className="audit-toolbar">
+            <input
+              value={auditQuery}
+              placeholder="按动作、结果或 trace ID 筛选"
+              onChange={(event) => setAuditQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void searchAudits();
+                }
+              }}
+            />
+            <button className="secondary-panel-button" type="button" onClick={() => void searchAudits()}>
+              筛选
+            </button>
+          </div>
+          <div className="audit-list">
+            {audits.length === 0 ? (
+              <p className="center-empty">没有匹配的审计记录。</p>
+            ) : (
+              audits.map((audit) => (
+                <article className="audit-row" key={audit.id}>
+                  <div>
+                    <strong>{auditLabel(audit.action)}</strong>
+                    <p>
+                      {formatDateTime(audit.occurredAt)} · {audit.outcome}
+                      {audit.reason ? ` · ${audit.reason}` : ""}
+                    </p>
+                  </div>
+                  <code>{audit.traceId?.slice(0, 8) || "no-trace"}</code>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
       </div>
       {pendingConfirmation ? (
         <div className="confirmation-overlay">
@@ -1657,6 +1716,20 @@ function toolCallStatusLabel(status: ToolCallRecord["status"]): string {
     denied: "已拒绝",
     needs_reconciliation: "待对账",
   }[status];
+}
+
+function auditLabel(action: string): string {
+  return {
+    "tool.started": "工具开始执行",
+    "tool.completed": "工具执行完成",
+    "tool.failed": "工具执行失败",
+    "tool.cancelled": "工具执行取消",
+    "tool.denied": "工具调用被拒绝",
+    "tool.confirmation_requested": "请求高风险确认",
+    "tool.approved": "高风险动作已批准",
+    "tool.rejected": "高风险动作被拒绝",
+    "tool.confirmation_expired": "高风险确认过期",
+  }[action] ?? action;
 }
 
 function SourceBadge({

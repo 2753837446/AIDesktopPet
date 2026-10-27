@@ -28,6 +28,7 @@ import type { DesktopSettingsPatch, DesktopWindowMode } from "../shared/settings
 import { CredentialStore } from "./credential-store";
 import { createTrayIcon } from "./icon";
 import { openDatabase, type OpenedDatabase } from "./persistence/database";
+import { SqliteAuditRepository } from "./persistence/audit-repository";
 import { SqliteConversationRepository } from "./persistence/conversation-repository";
 import { SqliteConnectorRepository } from "./persistence/connector-repository";
 import { SqliteDailyBriefRepository } from "./persistence/daily-brief-repository";
@@ -892,6 +893,26 @@ function registerIpcHandlers(): void {
     }
     return new SqliteConnectorRepository(databaseHandle.database).list();
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.listAuditLogs,
+    (event, query: unknown, limit: unknown) => {
+      assertTrustedSender(event.sender.id);
+      if (!databaseHandle) {
+        return [];
+      }
+      const parsedQuery =
+        query === undefined
+          ? undefined
+          : z.string().max(300).parse(query);
+      const parsedLimit =
+        limit === undefined ? 200 : z.number().int().min(1).max(500).parse(limit);
+      return new SqliteAuditRepository(databaseHandle.database).list({
+        ...(parsedQuery === undefined ? {} : { query: parsedQuery }),
+        limit: parsedLimit,
+      });
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.quit, async (event) => {
     assertTrustedSender(event.sender.id);

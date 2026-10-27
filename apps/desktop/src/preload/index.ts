@@ -9,6 +9,7 @@ import {
 import type { DesktopSettings, DesktopSettingsPatch } from "../shared/settings";
 import type {
   CreateTaskInput,
+  AuditLogRecord,
   ConnectorRecord,
   DailyBriefRecord,
   MemorySearchResult,
@@ -123,6 +124,12 @@ const desktopApi: DesktopApi = {
     }>,
   listConnectors: () =>
     ipcRenderer.invoke(IPC_CHANNELS.listConnectors) as Promise<ConnectorRecord[]>,
+  listAuditLogs: (query?: string, limit?: number) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.listAuditLogs,
+      query,
+      limit,
+    ) as Promise<AuditLogRecord[]>,
   quit: () => ipcRenderer.invoke(IPC_CHANNELS.quit) as Promise<void>,
   onSettingsChanged: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, settings: DesktopSettings) => {
