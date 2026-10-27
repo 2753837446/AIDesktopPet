@@ -1,0 +1,14 @@
+{
+  "name": "ai-desktop-pet",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "pnpm --filter @ai-desktop-pet/desktop dev",
+    "build": "pnpm --filter @ai-desktop-pet/desktop build",
+    "check": "pnpm --filter @ai-desktop-pet/desktop check",
+    "test": "pnpm --filter @ai-desktop-pet/desktop test",
+    "test:e2e": "pnpm --filter @ai-desktop-pet/desktop test:e2e",
+    "package:win": "pnpm --filter @ai-desktop-pet/desktop package:win"
+  }
+}

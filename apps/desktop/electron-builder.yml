@@ -1,0 +1,22 @@
+appId: com.aidesktoppet.desktop
+productName: AI Desktop Pet
+electronDist: node_modules/electron/dist
+directories:
+  output: dist
+files:
+  - out/**/*
+  - package.json
+asar: true
+win:
+  # 发布前必须改为签名和写入应用元数据；P1 只验证 unpacked 包可启动。
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
