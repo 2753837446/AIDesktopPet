@@ -1,14 +1,16 @@
 {
-  "name": "ai-desktop-pet",
+  "name": "personal-digital-companion",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
-    "dev": "pnpm --filter @ai-desktop-pet/desktop dev",
-    "build": "pnpm --filter @ai-desktop-pet/desktop build",
-    "check": "pnpm --filter @ai-desktop-pet/desktop check",
-    "test": "pnpm --filter @ai-desktop-pet/desktop test",
-    "test:e2e": "pnpm --filter @ai-desktop-pet/desktop test:e2e",
-    "package:win": "pnpm --filter @ai-desktop-pet/desktop package:win"
+    "dev": "pnpm --filter @companion/contracts build && pnpm --parallel --filter @companion/api --filter @companion/web dev",
+    "build": "pnpm -r build",
+    "check": "pnpm -r check",
+    "test": "pnpm -r test"
   }
 }

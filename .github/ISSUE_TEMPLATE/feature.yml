@@ -1,0 +1,40 @@
+name: Feature proposal
+description: 提出新能力或设计方向
+title: "[Feature] "
+labels: ["enhancement", "needs-discussion"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户问题
+      description: 谁在什么场景下遇到了什么问题？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 初步方案
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 领域
+      options:
+        - 数字伙伴身份
+        - 记忆
+        - 任务
+        - 多设备同步
+        - 外观与动作
+        - 模型与 Agent
+        - Connector
+        - 智能家居
+        - 安全与隐私
+        - UI / UX
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: 风险和边界
+      description: 隐私、权限、费用、许可证或兼容性影响

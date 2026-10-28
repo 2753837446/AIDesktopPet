@@ -1,0 +1,23 @@
+services:
+  companion:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 8787
+      HOST: 0.0.0.0
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
+      DATA_DIR: /data
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-mock}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-https://api.deepseek.com}
+      MODEL_NAME: ${MODEL_NAME:-deepseek-chat}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+    ports:
+      - "8787:8787"
+    volumes:
+      - companion-data:/data
+
+volumes:
+  companion-data:

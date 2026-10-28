@@ -1,131 +1,152 @@
-# AI Desktop Pet
+# Personal Digital Companion
 
-Windows 优先的 AI 桌宠项目。桌宠是用户入口，核心能力包括 AI 对话、可审计的长期记忆、持久化任务调度、主动反馈和受权限控制的外部连接器。
+> 一个私人数字空间、多个持续存在的数字伙伴、跨设备共享记忆与任务，以及可替换的角色身体。
 
-## 当前状态
+![Personal Companion Web preview](docs/assets/web-preview.png)
 
-**P13-P17 已完成：动漫角色预设、工具调用、通知策略、完整备份和本地日历数据源。**
+本项目不是“另一个聊天窗口”，也不把桌宠皮肤当作助手身份。核心目标是构建一个 **JARVIS-lite / F.R.I.D.A.Y.-lite** 式的个人数字伙伴平台：
 
-已实现：
+- 每个数字伙伴有持久身份、人格、记忆和工具权限。
+- 换装、换造型或换 Avatar 不会丢失关系和历史。
+- 电脑、手机和 Web 可以连接同一个私人 Workspace。
+- 不同伙伴拥有独立会话和私有记忆，也可以读取用户授权的共享记忆。
+- 任务和主动反馈由可持久化、可审计的服务层管理。
 
-- Electron + React + TypeScript + pnpm workspace。
-- 透明无边框桌宠窗口、拖动区域、窗口位置恢复和系统托盘。
-- 隔离 preload、白名单 IPC、严格设置 schema 和原子 JSON 持久化。
-- 基础设置页：窗口置顶、任务栏显示、角色大小、主动提醒、免打扰和开机启动偏好。
-- SQLite 版本化迁移、对话历史与消息持久化。
-- Electron `safeStorage` 加密保存 DeepSeek API Key。
-- `deepseek-flash` 流式对话、停止生成和错误状态。
-- 明确“请记住”消息写入长期记忆，并参与后续上下文检索。
-- 记忆中心支持搜索、编辑、删除和来源数量查看。
-- 一次性任务支持持久化创建、完成、取消、租约恢复和幂等通知。
-- 到期任务由主进程调度并调用 Windows 系统通知。
-- SiliconFlow BGE-M3 语义检索、1024 维本地向量和关键词混合排序。
-- Embedding 不可用时自动回退 FTS5，不阻塞对话。
-- 今日总结只使用本地任务和非 `local_only` 记忆，并明确标记未连接数据源。
-- 支持每天、工作日和每周重复任务，按 IANA 时区计算下一次发生时间。
-- 每日总结按设置时间作为持久化 maintenance task 自动执行。
-- 工具调用统一经过 schema、scope、风险、超时、取消和审计。
-- 高风险邮件发送和移至已删除必须经过用户确认。
-- Himalaya v2.1.0 已接入 QQ IMAP/SMTP；收件箱只读列表经过真实账号验证。
-- QQ 授权码已迁移到 Windows Credential Locker，Himalaya 通过 `password.command` 读取。
-- Connector 状态持久化；邮件正文不会未经用户操作自动读取。
-- 人格支持预设和自定义，可配置名称、自称、称呼、性格、语气、长度、边界和主动性。
-- 人格设置支持 JSON 导入导出，下一轮对话立即生效。
-- 固定安全底座不可被人格配置覆盖。
-- 工具中心增加持久化审计记录和筛选，显示动作、结果、原因与 trace ID。
-- 支持上传 PNG/GIF/WebP 桌宠形象，持久化、预览、切换和删除。
-- 图片资产校验真实格式、10 MiB 大小上限和 4096×4096 尺寸上限。
-- 角色资产预留 front/left/right/back 与状态视图，为多视图和 3D 演进提供统一入口。
-- 支持在聊天中说“让她坐在凳子上”，或在设置页输入姿态描述。
-- 动作指令先显示参考角色、模型、云端上传与可能费用，确认后才调用硅基流动 `Qwen/Qwen-Image-Edit-2509`。
-- AI 生成结果保存为新 `ai_generated` 资产，记录源角色、提示词、模型和时间；不覆盖原图。
-- 生成结果先预览，用户点击“设为桌宠”后才切换，可随时切回原图或历史姿态。
-- 生图结果立即下载并验证公网 HTTPS、图片格式、尺寸和 10 MiB 上限；支持 120 秒超时和取消。
-- 桌宠舞台默认保持透明，不自动添加矩形背景。
-- 可分别上传背景与最多 3 个透明前景道具，按背景、道具、角色顺序分层显示。
-- AI 支持“仅角色姿态”和“角色 + 道具 + 背景完整场景”；完整场景保存为独立 `scene` 资产。
-- 选择完整场景时自动让位独立背景与道具，避免重复叠加；删除任一图层后回退到剩余图层或透明舞台。
-- 提供“苏清月”内置角色预设：保留原始设定图，正面动漫桌宠、原画正面、侧面和背面透明资产随应用分发。
-- 内置角色首次启动幂等导入 SQLite 并默认选中；用户已有形象和人格不会被覆盖。
-- DeepSeek Flash 支持流式 function calling，可调用时间、邮箱状态、收件箱列表和邮件正文等只读工具。
-- 模型工具调用继续经过 schema、scope、超时、取消和审计；高风险发信/删除不进入自动工具清单。
-- 主动提醒真实遵守总开关、免打扰、类别开关和每日上限；抑制通知不会让任务误判失败或无限重试。
-- 支持 `.ics` 本地日历导入、Connector 状态、重复导入幂等和每日总结日程数据。
-- 支持完整备份与恢复：SQLite 一致性快照、记忆、任务、审计、角色资产和非敏感设置；备份排除密钥。
-- 恢复前自动保护当前数据，文件哈希校验失败则拒绝恢复，恢复成功后重启应用。
-- 未配置模型时的明确基础可用状态。
-- 设置、数据库、记忆、Assistant Core、SSE、任务调度和 Electron 端到端测试。
-- 已生成带动漫角色图标的 NSIS x64 测试安装包；正式分发仍需代码签名。
+旧版桌宠应用保存在 Git 标签 `legacy-aidesktoppet-v1`。
 
-尚未实现：
+## 当前阶段
 
-- 邮件发送和删除的真实副作用验收
-- 多视图角色包编辑器、连续动作帧、2D 骨骼和 3D 渲染器
-- 签名的 Windows 安装包
+项目处于 **早期基础版本**，已具备一个可运行的单人 Workspace：
 
-![P1 桌宠界面](./docs/assets/p1-pet-shell.png)
+- 服务端 SQLite 持久化、初始化令牌和 JWT 登录。
+- Windows 桌面浏览器与手机浏览器多设备登录。
+- 多个数字伙伴创建和切换。
+- 独立对话历史。
+- 个人共享、伙伴私有和项目记忆作用域。
+- 任务创建和完成。
+- 外观/服装/颜色切换，伙伴身份与记忆不变。
+- `mock` 模型模式，无模型 Key 也能体验完整流程。
+- OpenAI-compatible 模型接口。
+- Docker 单容器部署。
 
-![苏清月动漫桌宠](./docs/assets/p13-anime-pet.png)
+这不是最终产品。多设备实时同步、自动记忆提取、Electron 桌宠壳、语音、工具运行时和智能家居仍在路线图中。
 
-![人格设置](./docs/assets/p1-settings.png)
+## 为什么值得参与
 
-![DeepSeek 聊天界面](./docs/assets/p2-chat-shell.png)
+模型、Agent 框架、工作流和记忆库正在快速商品化。真正稀缺的是把这些能力组织成持续、可信、可拥有、跨设备存在的个人数字伙伴。
 
-![记忆中心](./docs/assets/p3-memory-center.png)
+我们希望在以下方向形成开放实现：
 
-![任务中心](./docs/assets/p4-task-center.png)
+- 数字伙伴身份与外观分离。
+- 共享记忆、私有记忆和设备私有上下文。
+- 多伙伴之间的权限与关系隔离。
+- 云端任务与设备端感知识别。
+- 可替换的人格、模型、声音和动作资产。
+- 有边界、不操纵依赖的情绪陪伴。
 
-![今日总结](./docs/assets/p5-live-daily-brief.png)
+详见 [JARVIS / F.R.I.D.A.Y. 可行性研究](docs/FEASIBILITY_JARVIS_ARCHETYPE_2026-10-28.md)。
 
-![工具与连接器](./docs/assets/p7-tool-center.png)
+## 快速开始
 
-![聊天中的 AI 姿态确认](./docs/assets/p11-pose-director.png)
-
-![角色与完整场景确认](./docs/assets/p12-character-stage.png)
-
-![背景、道具和场景模式设置](./docs/assets/p12-stage-settings.png)
-
-## 文档入口
-
-- [产品需求](./docs/PRD.md)
-- [系统架构](./docs/ARCHITECTURE.md)
-- [长期记忆](./docs/MEMORY_SYSTEM.md)
-- [任务引擎](./docs/TASK_ENGINE.md)
-- [数据库设计](./docs/DATABASE_API_DESIGN.md)
-- [API 契约](./docs/API_CONTRACTS.md)
-- [实施计划](./docs/CODEX_IMPLEMENTATION_PLAN.md)
-- [安全基线](./docs/SECURITY.md)
-- [视频技术借鉴](./docs/Windows_AI桌宠_视频技术借鉴与长期记忆架构方案.md)
-- [视频读取结果](./docs/VIDEO_FINDINGS.md)
-- [依赖与许可证](./docs/DEPENDENCIES.md)
-- [角色展现与 3D 演进](./docs/CHARACTER_RUNTIME.md)
-
-## 本地运行
+要求 Node.js 22.12+、pnpm 11+。
 
 ```powershell
+corepack enable
 pnpm install
+Copy-Item .env.example .env
+```
+
+修改 `.env`：
+
+```dotenv
+BOOTSTRAP_TOKEN=替换为至少 16 位的随机值
+JWT_SECRET=替换为至少 32 位的随机值
+DATA_DIR=./data
+MODEL_PROVIDER=mock
+```
+
+启动：
+
+```powershell
 pnpm dev
 ```
 
-验证：
+- Web：<http://127.0.0.1:5173>
+- API：<http://127.0.0.1:8787>
+
+首次打开 Web 时，用 `.env` 中的 `BOOTSTRAP_TOKEN` 创建 Workspace。之后可在另一台设备用同一邮箱和密码登录，共享伙伴、记忆和任务。
+
+## 接入模型
+
+```dotenv
+MODEL_PROVIDER=openai-compatible
+MODEL_BASE_URL=https://api.deepseek.com
+MODEL_NAME=deepseek-chat
+MODEL_API_KEY=你的服务端 Key
+```
+
+不要把真实 Key 提交到仓库。Web 客户端永远不直接持有模型 Key。
+
+## Docker 部署
+
+```powershell
+$env:BOOTSTRAP_TOKEN="替换为随机值"
+$env:JWT_SECRET="替换为至少32位随机值"
+$env:MODEL_PROVIDER="mock"
+docker compose up -d --build
+```
+
+浏览器访问 `http://服务器地址:8787` 前，需要配置反向代理把 Web 静态资源和 API 暴露在同一域名下，或分别部署 `apps/web/dist` 与 API。
+
+当前 Compose 单容器方案以个人或家庭部署为目标。公开多用户 SaaS 需要 PostgreSQL、限流、审计、租户隔离和独立密钥管理。
+
+## 项目结构
+
+```text
+apps/api             Fastify API、SQLite、模型适配
+apps/web             React 响应式 Web 客户端
+packages/contracts   共享 Zod 契约和 TypeScript 类型
+docs                 产品、架构、安全与研究
+openspec             需求提案、设计和任务
+```
+
+## 开发验证
 
 ```powershell
 pnpm check
 pnpm test
-pnpm test:e2e
 pnpm build
 ```
 
-## 里程碑
+## 路线图
 
-首版目标是 Windows 10 22H2 x64 与 Windows 11 x64 上的 2D 桌宠，基础桌宠不依赖模型、Agent runtime 或 QQ/NapCat/AstrBot 才能启动。ARM64 只有在真实安装包和运行验证完成后才能纳入支持矩阵。
+- V1：个人 Workspace、多伙伴、记忆作用域、任务、多设备登录。
+- V1.1：流式模型、自动记忆提取、语音、通知。
+- V1.2：Electron 桌宠、PWA、离线和增量同步。
+- V1.5：MCP / Tool Runtime、Home Assistant、低风险智能场景。
+- V2：多视图和动作包、2D/3D 适配、高风险智能家居审批。
 
-下一阶段进入 P18：补齐首次启动向导、签名安装/升级链路、记忆候选与项目状态，并继续把姿态/场景扩展为动作关键帧、表情包和多视图动画。DeepSeek 与 SiliconFlow 的 API Key 都只能通过设置页写入 Windows DPAPI 加密文件；QQ 授权码由 Windows Credential Locker 提供。
+详见 [ROADMAP.md](ROADMAP.md)。
 
-## 仓库约束
+## 参与贡献
 
-- 需求变化先写 OpenSpec 提案、设计和任务清单。
-- 外部输入、模型输出和连接器响应均按不可信数据处理。
-- `local_only` 数据不得发送到云端模型。
-- 高风险外部动作必须展示目标与影响并取得用户确认。
-- 没有测试、构建或运行证据时，不得在文档或提交说明中声明功能“已完成”或“通过”。
+欢迎通过 Issue、Discussion 和 Pull Request 参与：
+
+- 提交前阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 功能变化先讨论问题和使用场景。
+- 架构性变化先补 OpenSpec。
+- 安全漏洞请使用 GitHub Private Vulnerability Reporting。
+
+## 安全与隐私
+
+- `local_only` 和设备私有上下文不得发送到云端模型。
+- 密码强哈希；JWT Secret 和初始化令牌只从环境变量读取。
+- 模型、邮件、网页、文件与 Connector 响应都是不可信输入。
+- 高风险动作必须经过确认、审计和超时控制。
+- 智能家居安全联锁不得由 LLM 临时决定。
+
+详见 [SECURITY.md](SECURITY.md)。
+
+## License
+
+[MIT](LICENSE)

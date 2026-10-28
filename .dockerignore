@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+**/dist
+data
+analysis
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm
+.env
+.env.*
+.git
+test-results
+playwright-report
