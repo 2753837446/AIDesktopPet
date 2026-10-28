@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/Harleyoooo/AIDesktopPet/security/advisories/new
+    url: https://github.com/2753837446/AIDesktopPet/security/advisories/new
     about: 请私下报告安全漏洞，不要公开密钥和私人数据
   - name: Design discussion
-    url: https://github.com/Harleyoooo/AIDesktopPet/discussions
+    url: https://github.com/2753837446/AIDesktopPet/discussions
     about: 讨论产品方向、架构和数字伙伴设计
